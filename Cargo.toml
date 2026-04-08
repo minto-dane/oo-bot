@@ -3,9 +3,35 @@ name = "discord-ooh-bot"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+members = ["xtask", "fuzz"]
+
+[features]
+default = ["ja_on"]
+ja_on = []
+
 [dependencies]
-serenity = { version = "0.12", features = ["client", "gateway", "model", "cache"] }
-tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "rustls_backend"] }
+thiserror = "2.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tracing = "0.1"
-tracing-subscriber = "0.3"
 dotenvy = "0.15"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+unicode-normalization = "0.1"
+wasmtime = "43.0.0"
+wat = "1.246.2"
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["html_reports", "cargo_bench_support"] }
+proptest = "1.6"
+
+[[bench]]
+name = "oo_count_bench"
+harness = false
+
+[[bench]]
+name = "runtime_protection_bench"
+harness = false

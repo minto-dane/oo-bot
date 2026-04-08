@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kanjidic2>
+  <character>
+    <literal>大</literal>
+    <reading_meaning>
+      <rmgroup>
+        <reading r_type="ja_on">ダイ</reading>
+        <reading r_type="ja_kun">おお-きい</reading>
+      </rmgroup>
+      <nanori>はる</nanori>
+    </reading_meaning>
+  </character>
+  <character>
+    <literal>狼</literal>
+    <reading_meaning>
+      <rmgroup>
+        <reading r_type="ja_kun">おおかみ</reading>
+      </rmgroup>
+    </reading_meaning>
+  </character>
+  <character>
+    <literal>公</literal>
+    <reading_meaning>
+      <rmgroup>
+        <reading r_type="ja_on">コウ</reading>
+      </rmgroup>
+      <nanori>おおやけ</nanori>
+    </reading_meaning>
+  </character>
+  <character>
+    <literal>小</literal>
+    <reading_meaning>
+      <rmgroup>
+        <reading r_type="ja_kun">ちい-さい</reading>
+      </rmgroup>
+    </reading_meaning>
+  </character>
+</kanjidic2>

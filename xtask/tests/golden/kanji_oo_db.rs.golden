@@ -1,0 +1,23 @@
+use crate::domain::kanji_matcher::{KanjiOoDb, KanjiOoDbMetadata};
+
+pub const SOURCE_NAME: &str = "KANJIDIC2";
+pub const SOURCE_SHA256: &str = "test-sha";
+pub const INCLUDE_JA_ON: bool = true;
+
+pub const OO_KANJI_CODEPOINTS: &[u32] = &[
+    0x516C,
+    0x5927,
+    0x72FC,
+];
+
+pub const KANJI_OO_DB: KanjiOoDb = KanjiOoDb::new(
+    OO_KANJI_CODEPOINTS,
+    KanjiOoDbMetadata {
+        source_name: SOURCE_NAME,
+        source_sha256: SOURCE_SHA256,
+        total_chars: 3,
+        ja_kun_hits: 2,
+        nanori_hits: 1,
+        ja_on_hits: 0,
+    },
+);

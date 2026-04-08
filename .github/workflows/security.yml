@@ -1,0 +1,53 @@
+name: security-heavy
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  miri:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - run: cargo +nightly miri test --workspace
+
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - run: cargo fuzz run analyze_message -- -max_total_time=20
+      - run: cargo fuzz run sandbox_abi -- -max_total_time=20
+      - run: cargo fuzz run replay_parser -- -max_total_time=20
+
+  mutation:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+      - run: cargo mutants --test-tool=nextest --timeout=120
+
+  bench-sanity:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo bench --bench oo_count_bench -- --warm-up-time 0.1 --measurement-time 0.2
+      - run: cargo bench --bench runtime_protection_bench -- --warm-up-time 0.1 --measurement-time 0.2

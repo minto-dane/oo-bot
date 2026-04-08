@@ -1,0 +1,42 @@
+rules:
+  - id: rust-no-unwrap-expect-in-src
+    message: Avoid unwrap/expect in production code paths.
+    severity: WARNING
+    languages: [rust]
+    paths:
+      include:
+        - src/**/*.rs
+      exclude:
+        - src/bin/replay.rs
+    patterns:
+      - pattern-either:
+          - pattern: $X.unwrap()
+          - pattern: $X.expect($MSG)
+
+  - id: no-token-logging
+    message: Do not log token-like env values.
+    severity: ERROR
+    languages: [rust]
+    paths:
+      include:
+        - src/**/*.rs
+    pattern-either:
+      - pattern: tracing::info!(..., $TOKEN, ...)
+      - pattern: tracing::debug!(..., $TOKEN, ...)
+      - pattern: tracing::error!(..., $TOKEN, ...)
+    metavariable-regex:
+      metavariable: $TOKEN
+      regex: ".*(token|DISCORD_TOKEN).*"
+
+  - id: no-message-content-logs
+    message: Avoid logging full Discord message content.
+    severity: WARNING
+    languages: [rust]
+    paths:
+      include:
+        - src/**/*.rs
+    pattern-either:
+      - pattern: tracing::info!(..., msg.content, ...)
+      - pattern: tracing::debug!(..., msg.content, ...)
+      - pattern: tracing::warn!(..., msg.content, ...)
+      - pattern: tracing::error!(..., msg.content, ...)
