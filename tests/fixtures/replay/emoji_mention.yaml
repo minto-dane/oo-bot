@@ -1,0 +1,8 @@
+name: emoji_and_mention
+content: "<@1234567890> oo 😂"
+author_is_bot: false
+expected:
+  type: react
+  emoji_id: 1489695886773587978
+  emoji_name: Omilfy
+  animated: false

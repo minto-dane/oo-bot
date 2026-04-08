@@ -1,0 +1,9 @@
+name: duplicated_event_second
+message_id: 500
+content: "oo"
+author_is_bot: false
+runtime:
+  preserve_state: true
+expected_suppress_reason: duplicate
+expected:
+  type: noop

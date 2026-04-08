@@ -1,0 +1,9 @@
+name: channel_denied
+channel_id: 999
+content: "oo"
+author_is_bot: false
+runtime:
+  deny_channel_ids: [999]
+expected_suppress_reason: channel_denied
+expected:
+  type: noop

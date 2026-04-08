@@ -1,0 +1,9 @@
+name: guild_denied
+guild_id: 888
+content: "oo"
+author_is_bot: false
+runtime:
+  deny_guild_ids: [888]
+expected_suppress_reason: guild_denied
+expected:
+  type: noop

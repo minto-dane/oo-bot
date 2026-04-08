@@ -1,0 +1,7 @@
+name: sandbox_timeout
+content: "[[sandbox_timeout]] oo"
+author_is_bot: false
+runtime:
+  mode_override: normal
+expected:
+  type: noop

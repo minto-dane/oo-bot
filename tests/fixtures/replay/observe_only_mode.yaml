@@ -1,0 +1,9 @@
+name: observe_only_mode
+content: "oooo"
+author_is_bot: false
+runtime:
+  mode_override: observe_only
+expected_suppress_reason: mode_restricted
+expected:
+  type: noop
+expected_mode: observe_only

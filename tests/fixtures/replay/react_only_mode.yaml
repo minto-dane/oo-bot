@@ -1,0 +1,11 @@
+name: react_only_mode
+content: "oooo"
+author_is_bot: false
+runtime:
+  mode_override: react_only
+expected:
+  type: react
+  emoji_id: 1489695886773587978
+  emoji_name: Omilfy
+  animated: false
+expected_mode: react_only

@@ -1,0 +1,5 @@
+name: dangerous_like_input
+content: "```env\nDISCORD_TOKEN=please_do_not_log\n``` \u202E"
+author_is_bot: false
+expected:
+  type: noop

@@ -1,0 +1,9 @@
+name: full_disable_mode
+content: "oooo"
+author_is_bot: false
+runtime:
+  emergency_kill_switch: true
+expected_suppress_reason: mode_restricted
+expected:
+  type: noop
+expected_mode: full_disable

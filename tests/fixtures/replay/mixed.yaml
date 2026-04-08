@@ -1,0 +1,6 @@
+name: mixed_kana_romaji_kanji
+content: "おおoo大"
+author_is_bot: false
+expected:
+  type: send_message
+  content: "<:Omilfy:1489695886773587978> <:Omilfy:1489695886773587978> <:Omilfy:1489695886773587978>"

@@ -1,0 +1,6 @@
+name: bot_message
+content: "おおoo"
+author_is_bot: true
+expected_suppress_reason: self_trigger
+expected:
+  type: noop

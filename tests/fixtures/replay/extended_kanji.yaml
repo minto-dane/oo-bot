@@ -1,0 +1,5 @@
+name: extended_kanji_non_target
+content: "𠮷𠮟𡈽"
+author_is_bot: false
+expected:
+  type: noop

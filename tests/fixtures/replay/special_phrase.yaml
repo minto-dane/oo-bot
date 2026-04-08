@@ -1,0 +1,6 @@
+name: special_phrase_priority
+content: "これはおお oo 大"
+author_is_bot: false
+expected:
+  type: send_message
+  content: "<:Omilfy:1489695886773587978>"

@@ -1,0 +1,7 @@
+name: sandbox_trap
+content: "[[sandbox_trap]] oo"
+author_is_bot: false
+runtime:
+  mode_override: normal
+expected:
+  type: noop

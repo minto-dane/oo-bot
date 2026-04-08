@@ -1,0 +1,9 @@
+name: audit_only_mode
+content: "oooo"
+author_is_bot: false
+runtime:
+  mode_override: audit_only
+expected_suppress_reason: mode_restricted
+expected:
+  type: noop
+expected_mode: audit_only

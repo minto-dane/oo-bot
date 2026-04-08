@@ -1,0 +1,9 @@
+name: breaker_observe_mode
+content: "oooo"
+author_is_bot: false
+runtime:
+  inject_statuses: [429, 429]
+expected_suppress_reason: mode_restricted
+expected:
+  type: noop
+expected_mode: observe_only

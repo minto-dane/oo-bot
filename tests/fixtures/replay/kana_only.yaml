@@ -1,0 +1,6 @@
+name: kana_only
+content: "おおおお"
+author_is_bot: false
+expected:
+  type: send_message
+  content: "<:Omilfy:1489695886773587978> <:Omilfy:1489695886773587978>"
