@@ -1,0 +1,30 @@
+# Glossary
+
+- trusted core
+  - Discord token を保持し、最終アクション決定と送信ガードを担う領域。
+- sandboxed analyzer
+  - Wasmtime guest として動作し、ActionProposal のみ返す解析器。
+- ActionProposal
+  - sandbox が返す中間提案。最終送信権限は持たない。
+- BotAction
+  - core が最終採用した実行アクション。
+- suppress_reason
+  - core が送信抑止した理由。
+- RuntimeMode
+  - `normal` / `observe_only` / `react_only` / `audit_only` / `full_disable`。
+- duplicate suppression
+  - message_id と TTL による再配送抑止。
+- cooldown
+  - user/channel/guild/global の時間窓抑止。
+- token bucket
+  - outbound 量の平滑化制御。
+- circuit breaker
+  - 401/403/429 集中時の outbound 停止制御。
+- session budget
+  - Gateway session start 残量に基づく縮退判断。
+- suspicious input
+  - 長文・bidi 制御文字・反復過多などのリスク入力分類。
+- replay harness
+  - Discord 非依存で fixture を再生し、挙動を固定回帰する仕組み。
+- deterministic generation
+  - 同一入力辞書から同一生成物を得る再現可能な生成手順。
