@@ -1,6 +1,6 @@
 #![no_main]
 
-use discord_ooh_bot::app::replay::ReplayCase;
+use discord_oo_bot::app::replay::ReplayCase;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

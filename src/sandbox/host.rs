@@ -49,7 +49,7 @@ impl WasmtimeSandboxAnalyzer {
     }
 
     fn fetch_abi_version(&self) -> Result<u32, String> {
-        let mut store = self.new_store();
+        let mut store = self.new_store()?;
         let instance = Instance::new(&mut store, &self.module, &[]).map_err(|e| e.to_string())?;
         let abi_fn: TypedFunc<(), i32> =
             instance.get_typed_func(&mut store, "abi_version").map_err(|e| e.to_string())?;
@@ -57,7 +57,7 @@ impl WasmtimeSandboxAnalyzer {
         Ok(abi as u32)
     }
 
-    fn new_store(&self) -> Store<SandboxStoreState> {
+    fn new_store(&self) -> Result<Store<SandboxStoreState>, String> {
         let limits = StoreLimitsBuilder::new()
             .memory_size(self.cfg.memory_limit_bytes)
             .table_elements(self.cfg.table_elements_limit)
@@ -69,8 +69,8 @@ impl WasmtimeSandboxAnalyzer {
 
         let mut store = Store::new(&self.engine, SandboxStoreState { limits });
         store.limiter(|s| &mut s.limits);
-        store.set_fuel(self.cfg.fuel_limit).expect("sandbox fuel should be configurable");
-        store
+        store.set_fuel(self.cfg.fuel_limit).map_err(|e| e.to_string())?;
+        Ok(store)
     }
 }
 
@@ -94,7 +94,9 @@ impl ProposalAnalyzer for WasmtimeSandboxAnalyzer {
             ));
         }
 
-        let mut store = self.new_store();
+        let mut store = self
+            .new_store()
+            .map_err(|e| AnalyzerError::Trap(format!("sandbox setup failed: {e}")))?;
         let instance = Instance::new(&mut store, &self.module, &[])
             .map_err(|e| AnalyzerError::Trap(e.to_string()))?;
 
@@ -417,37 +419,49 @@ mod tests {
 
     #[test]
     fn simple_proposals_work() {
-        let mut analyzer = WasmtimeSandboxAnalyzer::new(SandboxConfig::default())
-            .expect("sandbox init should succeed");
+        let mut analyzer = match WasmtimeSandboxAnalyzer::new(SandboxConfig::default()) {
+            Ok(analyzer) => analyzer,
+            Err(err) => panic!("sandbox init should succeed: {err}"),
+        };
 
-        let proposal = analyzer
-            .propose(&AnalyzerRequest { content: "oo", kanji_count: 0, special_phrase_hit: false })
-            .expect("proposal should succeed");
+        let proposal = match analyzer.propose(&AnalyzerRequest {
+            content: "oo",
+            kanji_count: 0,
+            special_phrase_hit: false,
+        }) {
+            Ok(proposal) => proposal,
+            Err(err) => panic!("proposal should succeed: {err:?}"),
+        };
         assert_eq!(proposal, ActionProposal::ReactOnce);
 
-        let proposal = analyzer
-            .propose(&AnalyzerRequest {
-                content: "oooo",
-                kanji_count: 1,
-                special_phrase_hit: false,
-            })
-            .expect("proposal should succeed");
+        let proposal = match analyzer.propose(&AnalyzerRequest {
+            content: "oooo",
+            kanji_count: 1,
+            special_phrase_hit: false,
+        }) {
+            Ok(proposal) => proposal,
+            Err(err) => panic!("proposal should succeed: {err:?}"),
+        };
         assert_eq!(proposal, ActionProposal::SendStamped { count: 3 });
 
-        let proposal = analyzer
-            .propose(&AnalyzerRequest {
-                content: "whatever",
-                kanji_count: 0,
-                special_phrase_hit: true,
-            })
-            .expect("proposal should succeed");
+        let proposal = match analyzer.propose(&AnalyzerRequest {
+            content: "whatever",
+            kanji_count: 0,
+            special_phrase_hit: true,
+        }) {
+            Ok(proposal) => proposal,
+            Err(err) => panic!("proposal should succeed: {err:?}"),
+        };
         assert_eq!(proposal, ActionProposal::SpecialPhrase);
     }
 
     #[test]
     fn timeout_by_low_fuel_is_handled() {
         let cfg = SandboxConfig { fuel_limit: 8, ..SandboxConfig::default() };
-        let mut analyzer = WasmtimeSandboxAnalyzer::new(cfg).expect("sandbox init should succeed");
+        let mut analyzer = match WasmtimeSandboxAnalyzer::new(cfg) {
+            Ok(analyzer) => analyzer,
+            Err(err) => panic!("sandbox init should succeed: {err}"),
+        };
         let payload = "a".repeat(4000);
 
         let result = analyzer.propose(&AnalyzerRequest {

@@ -1,4 +1,4 @@
-use discord_ooh_bot::{
+use discord_oo_bot::{
     app::analyze_message::{BotAction, BotConfig},
     generated::kanji_oo_db::KANJI_OO_DB,
     sandbox::host::{SandboxConfig, WasmtimeSandboxAnalyzer},

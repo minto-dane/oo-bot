@@ -8,6 +8,9 @@
 
 - DISCORD_TOKEN
 
+`DISCORD_TOKEN` は未設定で起動失敗します。
+空文字、`.` を含まない値、極端に短い値も `StartupError::InvalidEnv` になります。
+
 ## 推奨（通常運転）
 
 - OO_EMOJI_ID
@@ -30,6 +33,12 @@
 - OO_LONG_MESSAGE_SOFT_CHARS / OO_LONG_MESSAGE_HARD_CHARS / OO_SUSPICIOUS_REPETITION_THRESHOLD
 - OO_BREAKER_WINDOW_MS / OO_BREAKER_THRESHOLD / OO_BREAKER_OPEN_MS
 
+補足:
+
+- `OO_GLOBAL_RATE_BURST` は `u32`
+- `OO_MAX_ACTIONS_PER_MESSAGE` は `u8`
+- 型幅を超える値は黙って切り捨てられず、起動失敗になります
+
 ## sandbox
 
 - OO_SANDBOX_MEMORY_BYTES
@@ -46,12 +55,22 @@
 - OO_SESSION_BUDGET_RESET_AFTER
 - OO_SESSION_BUDGET_LOW_WATERMARK
 
+補足:
+
+- `OO_SESSION_BUDGET_TOTAL` / `REMAINING` / `LOW_WATERMARK` は `u32`
+- `OO_SESSION_BUDGET_REMAINING > OO_SESSION_BUDGET_TOTAL` は不正として起動失敗します
+- low watermark 以下で起動した場合、最初の message decision で `ReactOnly` へ遷移しやすくなります
+
 ## 例
 
 ```bash
 export DISCORD_TOKEN=xxxxx.yyyyy.zzzzz
 export OO_MODE_OVERRIDE=
 export OO_EMERGENCY_KILL_SWITCH=false
+export OO_GLOBAL_RATE_BURST=30
+export OO_MAX_ACTIONS_PER_MESSAGE=1
+export OO_SESSION_BUDGET_TOTAL=1000
+export OO_SESSION_BUDGET_REMAINING=1000
 ```
 
 詳細は [config-reference.md](config-reference.md) を参照。

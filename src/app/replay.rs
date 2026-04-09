@@ -11,8 +11,12 @@ use thiserror::Error;
 use crate::{
     app::analyze_message::{analyze_message, BotAction, BotConfig},
     domain::kanji_matcher::KanjiOoDb,
+    sandbox::{
+        abi::{ActionProposal, AnalyzerError, AnalyzerRequest, ProposalAnalyzer},
+        host::{SandboxConfig, WasmtimeSandboxAnalyzer},
+    },
     security::{
-        core_governor::{MessageContext, SuppressReason, TrustedCore},
+        core_governor::{MessageContext, RuntimeProtectionConfig, SuppressReason, TrustedCore},
         mode::RuntimeMode,
     },
 };
@@ -146,6 +150,8 @@ pub fn run_replay_case_with_core(case: &ReplayCase, core: &mut TrustedCore) -> R
     if let (Some(soft), Some(hard)) = (case.runtime.soft_char_limit, case.runtime.hard_char_limit) {
         let repetition = case.runtime.repetition_threshold.unwrap_or(256);
         core.set_suspicious_thresholds(soft, hard, repetition);
+    } else {
+        core.reset_suspicious_thresholds();
     }
     for status in &case.runtime.inject_statuses {
         core.record_http_status(*status);
@@ -196,6 +202,33 @@ pub fn run_replay_case_with_core(case: &ReplayCase, core: &mut TrustedCore) -> R
     Ok(())
 }
 
+pub fn build_replay_core(config: BotConfig, db: &'static KanjiOoDb) -> Result<TrustedCore, String> {
+    let analyzer = WasmtimeSandboxAnalyzer::new(SandboxConfig {
+        fuel_limit: 800_000,
+        ..SandboxConfig::default()
+    })?;
+
+    let runtime_cfg = RuntimeProtectionConfig {
+        per_user_cooldown_ms: 0,
+        per_channel_cooldown_ms: 0,
+        per_guild_cooldown_ms: 0,
+        global_cooldown_ms: 0,
+        breaker_threshold: 2,
+        // Keep baseline replay compatibility with pure analyzer behavior.
+        // Runtime-sensitive fixtures override these thresholds explicitly.
+        long_message_soft_chars: 20_000,
+        long_message_hard_chars: 30_000,
+        ..RuntimeProtectionConfig::default()
+    };
+
+    Ok(TrustedCore::new(
+        Box::new(ReplayHarnessAnalyzer { inner: analyzer }),
+        config,
+        runtime_cfg,
+        db,
+    ))
+}
+
 fn load_replay_cases_from_file(path: &Path) -> Result<Vec<ReplayCase>, ReplayError> {
     let content = fs::read_to_string(path).map_err(|e| ReplayError::ReadFixture(e.to_string()))?;
 
@@ -241,4 +274,24 @@ fn stable_id_from_name(name: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     name.hash(&mut hasher);
     hasher.finish()
+}
+
+struct ReplayHarnessAnalyzer {
+    inner: WasmtimeSandboxAnalyzer,
+}
+
+impl ProposalAnalyzer for ReplayHarnessAnalyzer {
+    fn abi_version(&self) -> u32 {
+        self.inner.abi_version()
+    }
+
+    fn propose(&mut self, req: &AnalyzerRequest<'_>) -> Result<ActionProposal, AnalyzerError> {
+        if req.content.contains("[[sandbox_trap]]") {
+            return Err(AnalyzerError::Trap("injected trap".to_string()));
+        }
+        if req.content.contains("[[sandbox_timeout]]") {
+            return Err(AnalyzerError::Timeout);
+        }
+        self.inner.propose(req)
+    }
 }

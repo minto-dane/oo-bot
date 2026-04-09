@@ -41,6 +41,12 @@ cargo xtask generate
 cargo test --workspace --all-features
 ```
 
+shell に入らず、ツール群だけ profile へ追加したい場合:
+
+```bash
+nix profile install .#security-tools
+```
+
 監査込みの確認は次です。
 
 ```bash

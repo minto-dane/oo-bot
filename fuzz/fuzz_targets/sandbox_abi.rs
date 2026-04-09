@@ -1,6 +1,6 @@
 #![no_main]
 
-use discord_ooh_bot::sandbox::abi::ActionProposal;
+use discord_oo_bot::sandbox::abi::ActionProposal;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

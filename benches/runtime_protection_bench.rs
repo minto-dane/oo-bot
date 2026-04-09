@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use discord_ooh_bot::{
+use discord_oo_bot::{
     app::analyze_message::{analyze_message, BotConfig},
     generated::kanji_oo_db::KANJI_OO_DB,
     sandbox::host::{SandboxConfig, WasmtimeSandboxAnalyzer},

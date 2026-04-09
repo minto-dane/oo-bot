@@ -1,4 +1,4 @@
-use discord_ooh_bot::{
+use discord_oo_bot::{
     domain::kanji_matcher::kanji_has_oo_reading, generated::kanji_oo_db::KANJI_OO_DB,
 };
 

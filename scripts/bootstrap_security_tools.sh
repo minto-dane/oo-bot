@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Fallback bootstrap for non-Nix environments.
+# If you use the repo flake, prefer `nix develop` instead.
+
 if ! command -v cargo >/dev/null 2>&1; then
   echo "cargo is required" >&2
   exit 1

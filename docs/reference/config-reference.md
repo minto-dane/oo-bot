@@ -6,12 +6,18 @@
 
 ## パース規則
 
-- 整数: `u64` / `usize` パース
+- 整数: 実装側の型で parse
+  - `u64`: 例 `OO_BREAKER_WINDOW_MS`
+  - `usize`: 例 `OO_DUPLICATE_CACHE_CAP`
+  - `u32`: 例 `OO_GLOBAL_RATE_BURST`, `OO_SESSION_BUDGET_TOTAL`
+  - `u8`: 例 `OO_MAX_ACTIONS_PER_MESSAGE`
 - 真偽値: `1,true,yes,on` / `0,false,no,off`
 - ID リスト: `1,2,3` の comma-separated u64
 - mode override: `normal|observe-only|observe_only|react-only|react_only|audit-only|audit_only|full-disable|full_disable`
 
 不正値は `StartupError::InvalidEnv` で起動失敗します。
+型幅超過も同様に起動失敗します。
+`OO_SESSION_BUDGET_REMAINING > OO_SESSION_BUDGET_TOTAL` も起動失敗です。
 
 ## Bot behavior keys
 
@@ -47,8 +53,8 @@
 | OO_COOLDOWN_GUILD_MS | u64 | 250 | >=0 | 小さいと guild burst 余地 | guild 粒度抑止 | OO_COOLDOWN_GUILD_MS=500 | parse 失敗で起動失敗 |
 | OO_COOLDOWN_GLOBAL_MS | u64 | 100 | >=0 | 低すぎると全体 burst 増加 | 全体抑止 | OO_COOLDOWN_GLOBAL_MS=300 | parse 失敗で起動失敗 |
 | OO_GLOBAL_RATE_PER_SEC | f64 | 20.0 | >0 | 低すぎると過抑止/高すぎると連投 | outbound スループット | OO_GLOBAL_RATE_PER_SEC=15 | parse 失敗で起動失敗 |
-| OO_GLOBAL_RATE_BURST | u32 | 30 | >=1 | 高すぎると瞬間連投 | burst 許容量 | OO_GLOBAL_RATE_BURST=20 | parse 失敗で起動失敗 |
-| OO_MAX_ACTIONS_PER_MESSAGE | u8 | 1 | 0..255 | 0 は常時抑止 | 緊急抑止に利用可 | OO_MAX_ACTIONS_PER_MESSAGE=1 | parse 失敗で起動失敗 |
+| OO_GLOBAL_RATE_BURST | u32 | 30 | >=1 | 高すぎると瞬間連投 | burst 許容量 | OO_GLOBAL_RATE_BURST=20 | parse 失敗または `u32` overflow で起動失敗 |
+| OO_MAX_ACTIONS_PER_MESSAGE | u8 | 1 | 0..255 | 0 は常時抑止 | 緊急抑止に利用可 | OO_MAX_ACTIONS_PER_MESSAGE=1 | parse 失敗または `u8` overflow で起動失敗 |
 
 ## Suspicious / breaker keys
 
@@ -71,10 +77,16 @@
 | OO_SANDBOX_INSTANCE_LIMIT | usize | 4 | >=1 | 制限緩和で資源圧迫余地 | 同時 instance 制限 | OO_SANDBOX_INSTANCE_LIMIT=4 | parse 失敗で起動失敗 |
 | OO_SANDBOX_FAILURE_WINDOW_MS | u64 | 30000 | >=1 | 小さすぎると spike 見落とし | audit_only 遷移窓 | OO_SANDBOX_FAILURE_WINDOW_MS=45000 | parse 失敗で起動失敗 |
 | OO_SANDBOX_FAILURE_THRESHOLD | usize | 10 | >=1 | 低すぎると過剰 audit | 失敗許容度 | OO_SANDBOX_FAILURE_THRESHOLD=5 | parse 失敗で起動失敗 |
-| OO_SESSION_BUDGET_TOTAL | u32 | 1000 | >=1 | 参照値 | 運用判断に使用 | OO_SESSION_BUDGET_TOTAL=1000 | parse 失敗で起動失敗 |
-| OO_SESSION_BUDGET_REMAINING | u32 | 1000 | 0..total | 低値で react_only へ | 縮退起動判定 | OO_SESSION_BUDGET_REMAINING=12 | parse 失敗で起動失敗 |
+| OO_SESSION_BUDGET_TOTAL | u32 | 1000 | >=1 | 参照値 | 運用判断に使用 | OO_SESSION_BUDGET_TOTAL=1000 | parse 失敗または `u32` overflow で起動失敗 |
+| OO_SESSION_BUDGET_REMAINING | u32 | 1000 | 0..=total | 低値で react_only へ | 縮退起動判定 | OO_SESSION_BUDGET_REMAINING=12 | parse 失敗、`u32` overflow、または `remaining > total` で起動失敗 |
 | OO_SESSION_BUDGET_RESET_AFTER | u64 | 86400 | >=1 | 参照値 | 復旧判断に使用 | OO_SESSION_BUDGET_RESET_AFTER=3600 | parse 失敗で起動失敗 |
-| OO_SESSION_BUDGET_LOW_WATERMARK | u32 | 5 | >=1 | 高すぎると早期縮退 | react_only 閾値 | OO_SESSION_BUDGET_LOW_WATERMARK=10 | parse 失敗で起動失敗 |
+| OO_SESSION_BUDGET_LOW_WATERMARK | u32 | 5 | >=1 | 高すぎると早期縮退 | react_only 閾値 | OO_SESSION_BUDGET_LOW_WATERMARK=10 | parse 失敗または `u32` overflow で起動失敗 |
+
+## 運用メモ
+
+- replay harness は production default と同じ runtime 値を使いません。
+  replay は fixture 安定性のため、cooldown 0 / breaker threshold 2 の専用 baseline を使います。
+- 本番挙動を確認したい場合は replay だけでなく runtime integration test と実際の env 設定を併用してください。
 
 ## 参照
 

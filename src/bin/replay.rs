@@ -2,14 +2,12 @@
 
 use std::{path::PathBuf, process::ExitCode};
 
-use discord_ooh_bot::{
+use discord_oo_bot::{
     app::{
         analyze_message::BotConfig,
-        replay::{load_replay_cases, run_replay_case_with_core},
+        replay::{build_replay_core, load_replay_cases, run_replay_case_with_core},
     },
     generated::kanji_oo_db::KANJI_OO_DB,
-    sandbox::host::{SandboxConfig, WasmtimeSandboxAnalyzer},
-    security::core_governor::{RuntimeProtectionConfig, TrustedCore},
 };
 
 fn main() -> ExitCode {
@@ -19,19 +17,13 @@ fn main() -> ExitCode {
         .unwrap_or_else(|| PathBuf::from("tests/fixtures/replay"));
 
     let config = BotConfig::default();
-    let analyzer = match WasmtimeSandboxAnalyzer::new(SandboxConfig::default()) {
-        Ok(analyzer) => analyzer,
+    let mut core = match build_replay_core(config.clone(), &KANJI_OO_DB) {
+        Ok(core) => core,
         Err(err) => {
             eprintln!("failed to initialize sandbox: {err}");
             return ExitCode::FAILURE;
         }
     };
-    let mut core = TrustedCore::new(
-        Box::new(analyzer),
-        config,
-        RuntimeProtectionConfig::default(),
-        &KANJI_OO_DB,
-    );
 
     let cases = match load_replay_cases(&input) {
         Ok(cases) => cases,
@@ -48,6 +40,15 @@ fn main() -> ExitCode {
 
     let mut failures = 0usize;
     for case in &cases {
+        if !case.runtime.preserve_state {
+            core = match build_replay_core(config.clone(), &KANJI_OO_DB) {
+                Ok(core) => core,
+                Err(err) => {
+                    eprintln!("failed to initialize sandbox: {err}");
+                    return ExitCode::FAILURE;
+                }
+            };
+        }
         if let Err(diff) = run_replay_case_with_core(case, &mut core) {
             failures += 1;
             eprintln!("{diff}");

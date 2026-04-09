@@ -12,6 +12,11 @@
   - `DISCORD_TOKEN` 未設定
 - `StartupError::InvalidEnv`:
   - 環境変数型不正、mode 文字列不正
+  - 型幅超過
+    - 例: `OO_MAX_ACTIONS_PER_MESSAGE=256`
+    - 例: `OO_GLOBAL_RATE_BURST=4294967296`
+  - session budget の整合性不正
+    - 例: `OO_SESSION_BUDGET_REMAINING > OO_SESSION_BUDGET_TOTAL`
 - `StartupError::SandboxInit`:
   - Wasmtime 初期化失敗
 
@@ -19,6 +24,7 @@
 
 1. [reference/env-reference.md](../reference/env-reference.md) を確認
 2. `cargo run` の stderr を確認
+3. `env.example` と見比べて、値の型と単位を確認
 
 ### 2. 反応しない（Noop 多発）
 
@@ -30,19 +36,35 @@
 4. mode が observe/audit/full_disable でないか
 5. suspicious 判定で落ちていないか
 
+見るべきログ項目:
+
+- `suppress_reason`
+- `mode`
+- `analyzer_result`
+- `content_len`
+
 ### 3. 429 連発
 
 - breaker open の可能性
 - mode が observe_only へ遷移しているか確認
+- `record_http_status(429)` が `OO_BREAKER_THRESHOLD` 回以上、breaker window 内で蓄積していないか確認
+- recovery には `OO_BREAKER_OPEN_MS` 経過が必要
 
 ### 4. replay 失敗
 
 - `expected_suppress_reason` 不一致を確認
 - fixture の `preserve_state` が妥当か確認
+- ほぼ全部 `Cooldown` で落ちる場合:
+  - harness が state をケース間で共有しすぎていないか確認
+  - replay CLI と test harness が同じ core builder を使っているか確認
+- trap/timeout 系 fixture が再現しない場合:
+  - `[[sandbox_trap]]` / `[[sandbox_timeout]]` を含む入力になっているか確認
+  - replay 専用 analyzer injection が有効か確認
 
 ## 再現コマンド
 
 ```bash
+cargo run --bin replay -- tests/fixtures/replay
 cargo test --test replay_harness --test replay_suppress_reason_regression --all-features
 cargo test --test fault_injection --all-features
 ```

@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use discord_ooh_bot::domain::oo_counter::count_oo_sequences;
+use discord_oo_bot::domain::oo_counter::count_oo_sequences;
 
 fn legacy_count_oo_sequences(text: &str) -> usize {
     let chars: Vec<char> = text.chars().collect();

@@ -5,13 +5,23 @@ rules:
     languages: [rust]
     paths:
       include:
-        - src/**/*.rs
+        - /src/**/*.rs
       exclude:
-        - src/bin/replay.rs
+        - /src/bin/replay.rs
     patterns:
       - pattern-either:
           - pattern: $X.unwrap()
           - pattern: $X.expect($MSG)
+      - pattern-not-inside: |
+          #[cfg(test)]
+          mod $M {
+            ...
+          }
+      - pattern-not-inside: |
+          #[test]
+          fn $F(...) {
+            ...
+          }
 
   - id: no-token-logging
     message: Do not log token-like env values.
@@ -19,7 +29,7 @@ rules:
     languages: [rust]
     paths:
       include:
-        - src/**/*.rs
+        - /src/**/*.rs
     pattern-either:
       - pattern: tracing::info!(..., $TOKEN, ...)
       - pattern: tracing::debug!(..., $TOKEN, ...)
@@ -34,7 +44,7 @@ rules:
     languages: [rust]
     paths:
       include:
-        - src/**/*.rs
+        - /src/**/*.rs
     pattern-either:
       - pattern: tracing::info!(..., msg.content, ...)
       - pattern: tracing::debug!(..., msg.content, ...)

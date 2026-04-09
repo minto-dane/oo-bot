@@ -1,4 +1,4 @@
-use discord_ooh_bot::{
+use discord_oo_bot::{
     app::analyze_message::{analyze_message, BotConfig},
     domain::{oo_counter::count_oo_sequences, reading_normalizer::normalize_reading},
     generated::kanji_oo_db::KANJI_OO_DB,

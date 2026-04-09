@@ -24,6 +24,6 @@
 - CI/CD: [.github/workflows/ci.yml](../.github/workflows/ci.yml), [.github/workflows/security.yml](../.github/workflows/security.yml)
 - 生成データ: [src/generated/kanji_oo_db.rs](../src/generated/kanji_oo_db.rs), [data/generated/kanji_oo_db_meta.json](../data/generated/kanji_oo_db_meta.json)
 - 生成器: [xtask/src/main.rs](../xtask/src/main.rs)
-- ローカル実行導線: [Justfile](../Justfile)
+- ローカル実行導線: [Justfile](../Justfile), [flake.nix](../flake.nix)
 
 ドキュメントが実装と矛盾する場合は、上記 source of truth を優先し、ドキュメントを更新します。

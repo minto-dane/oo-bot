@@ -106,12 +106,18 @@ mod tests {
     fn wire_roundtrip() {
         let proposal = ActionProposal::SendStamped { count: 12 };
         let wire = proposal.encode_wire();
-        let decoded = ActionProposal::decode_wire(wire).expect("decode should work");
+        let decoded = match ActionProposal::decode_wire(wire) {
+            Ok(decoded) => decoded,
+            Err(err) => panic!("decode should work: {err:?}"),
+        };
         assert_eq!(proposal, decoded);
 
         let reject = ActionProposal::Reject { reason: RejectReasonCode::SandboxTrap };
         let reject_wire = reject.encode_wire();
-        let reject_decoded = ActionProposal::decode_wire(reject_wire).expect("decode should work");
+        let reject_decoded = match ActionProposal::decode_wire(reject_wire) {
+            Ok(decoded) => decoded,
+            Err(err) => panic!("decode should work: {err:?}"),
+        };
         assert_eq!(reject, reject_decoded);
     }
 }

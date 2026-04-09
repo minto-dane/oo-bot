@@ -38,9 +38,13 @@
         ];
       in
       {
-        packages.security-tools = pkgs.symlinkJoin {
-          name = "oo-bot-security-tools";
-          paths = toolchain;
+        packages = rec {
+          security-tools = pkgs.symlinkJoin {
+            name = "oo-bot-security-tools";
+            paths = toolchain;
+          };
+
+          default = security-tools;
         };
 
         devShells.default = pkgs.mkShell {

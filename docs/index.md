@@ -37,6 +37,7 @@
   - [operations/rotation-and-recovery.md](operations/rotation-and-recovery.md)
 - 開発
   - [development/local-setup.md](development/local-setup.md)
+  - [development/nix-dev-shell.md](development/nix-dev-shell.md)
   - [development/test-strategy.md](development/test-strategy.md)
   - [development/ci-cd.md](development/ci-cd.md)
   - [development/code-generation.md](development/code-generation.md)

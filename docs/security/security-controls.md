@@ -46,12 +46,14 @@
 
 - fmt/clippy/tests/nextest/coverage
 - audit/deny/geiger/semgrep
+- Dependabot version updates / alerts / security updates
 - heavy: miri/fuzz/mutation/bench
 
 根拠:
 
 - [.github/workflows/ci.yml](../../.github/workflows/ci.yml)
 - [.github/workflows/security.yml](../../.github/workflows/security.yml)
+- [.github/dependabot.yml](../../.github/dependabot.yml)
 
 ## 制御の限界
 

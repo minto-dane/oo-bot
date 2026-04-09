@@ -9,6 +9,7 @@
 - Rust stable
 - Git
 - (任意) just
+- (任意) Nix
 
 ## 手順
 
@@ -22,9 +23,19 @@ cp env.example .env
 
 ## 推奨ツール導入
 
+Nix を使う場合:
+
+```bash
+nix develop
+```
+
+非 Nix 環境の場合:
+
 ```bash
 ./scripts/bootstrap_security_tools.sh
 ```
+
+Nix shell の詳細は [nix-dev-shell.md](nix-dev-shell.md) を参照してください。
 
 ## ビルド確認
 

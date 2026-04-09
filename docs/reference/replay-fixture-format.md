@@ -41,6 +41,18 @@ replay fixture のスキーマを固定し、回帰追加を統一します。
 - soft_char_limit / hard_char_limit / repetition_threshold
 - preserve_state
 
+### runtime fields の意味
+
+- `inject_statuses`:
+  trusted core に HTTP status を事前注入します。
+  breaker を開いたり invalid request 系の縮退を再現したい場合に使います。
+- `soft_char_limit` / `hard_char_limit` / `repetition_threshold`:
+  その fixture 実行中だけ suspicious classifier を上書きします。
+  次の fixture には持ち越されません。
+- `preserve_state`:
+  `true` の場合、直前ケースの duplicate cache / breaker / sandbox failure spike などの state を共有します。
+  既定値は `false` です。
+
 ## suppress reason 値
 
 - self_trigger
@@ -66,6 +78,23 @@ expected_suppress_reason: duplicate
 expected:
   type: noop
 ```
+
+```yaml
+name: breaker_observe_mode
+content: "oooo"
+runtime:
+  inject_statuses: [429, 429]
+expected_suppress_reason: mode_restricted
+expected_mode: observe_only
+expected:
+  type: noop
+```
+
+## 実務上の指針
+
+- duplicate や multi-step breaker fixture 以外では `preserve_state` を付けない
+- runtime override を使う場合は、`expected_mode` か `expected_suppress_reason` のどちらかも付けて意図を固定する
+- `sandbox_timeout` / `sandbox_trap` は replay harness 内の injected error で再現されるため、実際の wall-clock timeout を期待しない
 
 ## 実装
 

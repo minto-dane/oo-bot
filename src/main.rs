@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use discord_ooh_bot::{
+use discord_oo_bot::{
     app::analyze_message::{BotConfig, ReactionConfig},
     generated::kanji_oo_db::KANJI_OO_DB,
     infra::discord_handler::Handler,
@@ -41,9 +41,7 @@ async fn main() -> Result<(), StartupError> {
     let analyzer = WasmtimeSandboxAnalyzer::new(sandbox_cfg).map_err(StartupError::SandboxInit)?;
     let mut core = TrustedCore::new(Box::new(analyzer), config, runtime_cfg, &KANJI_OO_DB);
 
-    let budget_total = read_env_u64("OO_SESSION_BUDGET_TOTAL", 1000)? as u32;
-    let budget_remaining = read_env_u64("OO_SESSION_BUDGET_REMAINING", budget_total.into())? as u32;
-    let budget_reset_after = read_env_u64("OO_SESSION_BUDGET_RESET_AFTER", 86_400)?;
+    let (budget_total, budget_remaining, budget_reset_after) = load_session_budget()?;
     core.update_session_budget(budget_total, budget_remaining, budget_reset_after);
 
     if core.session_budget_low() {
@@ -78,10 +76,9 @@ fn load_runtime_config() -> Result<RuntimeProtectionConfig, StartupError> {
     cfg.per_guild_cooldown_ms = read_env_u64("OO_COOLDOWN_GUILD_MS", cfg.per_guild_cooldown_ms)?;
     cfg.global_cooldown_ms = read_env_u64("OO_COOLDOWN_GLOBAL_MS", cfg.global_cooldown_ms)?;
     cfg.global_rate_per_sec = read_env_f64("OO_GLOBAL_RATE_PER_SEC", cfg.global_rate_per_sec)?;
-    cfg.global_rate_burst =
-        read_env_u64("OO_GLOBAL_RATE_BURST", cfg.global_rate_burst.into())? as u32;
+    cfg.global_rate_burst = read_env_u32("OO_GLOBAL_RATE_BURST", cfg.global_rate_burst)?;
     cfg.max_actions_per_message =
-        read_env_u64("OO_MAX_ACTIONS_PER_MESSAGE", cfg.max_actions_per_message.into())? as u8;
+        read_env_u8("OO_MAX_ACTIONS_PER_MESSAGE", cfg.max_actions_per_message)?;
     cfg.max_send_chars = read_env_usize("OO_MAX_SEND_CHARS", cfg.max_send_chars)?;
     cfg.long_message_soft_chars =
         read_env_usize("OO_LONG_MESSAGE_SOFT_CHARS", cfg.long_message_soft_chars)?;
@@ -97,8 +94,7 @@ fn load_runtime_config() -> Result<RuntimeProtectionConfig, StartupError> {
     cfg.sandbox_failure_threshold =
         read_env_usize("OO_SANDBOX_FAILURE_THRESHOLD", cfg.sandbox_failure_threshold)?;
     cfg.session_budget_low_watermark =
-        read_env_u64("OO_SESSION_BUDGET_LOW_WATERMARK", cfg.session_budget_low_watermark.into())?
-            as u32;
+        read_env_u32("OO_SESSION_BUDGET_LOW_WATERMARK", cfg.session_budget_low_watermark)?;
     cfg.emergency_kill_switch = read_env_bool("OO_EMERGENCY_KILL_SWITCH", false)?;
     cfg.allow_guild_ids = read_env_id_list("OO_ALLOW_GUILD_IDS")?;
     cfg.deny_guild_ids = read_env_id_list("OO_DENY_GUILD_IDS")?;
@@ -115,6 +111,16 @@ fn load_sandbox_config() -> Result<SandboxConfig, StartupError> {
         table_elements_limit: read_env_usize("OO_SANDBOX_TABLE_ELEMENTS", 64)?,
         store_instance_limit: read_env_usize("OO_SANDBOX_INSTANCE_LIMIT", 4)?,
     })
+}
+
+fn load_session_budget() -> Result<(u32, u32, u64), StartupError> {
+    let budget_total = read_env_u32("OO_SESSION_BUDGET_TOTAL", 1000)?;
+    let budget_remaining = read_env_u32("OO_SESSION_BUDGET_REMAINING", budget_total)?;
+    let budget_reset_after = read_env_u64("OO_SESSION_BUDGET_RESET_AFTER", 86_400)?;
+    if budget_remaining > budget_total {
+        return Err(StartupError::InvalidEnv("OO_SESSION_BUDGET_REMAINING"));
+    }
+    Ok((budget_total, budget_remaining, budget_reset_after))
 }
 
 fn init_tracing() {
@@ -201,22 +207,91 @@ fn read_env_id_list(name: &'static str) -> Result<Vec<u64>, StartupError> {
 
 fn read_env_mode_override(
     name: &'static str,
-) -> Result<Option<discord_ooh_bot::security::mode::RuntimeMode>, StartupError> {
+) -> Result<Option<discord_oo_bot::security::mode::RuntimeMode>, StartupError> {
+    use discord_oo_bot::security::mode::RuntimeMode;
+
     let Ok(raw) = std::env::var(name) else {
         return Ok(None);
     };
 
     let mode = match raw.to_ascii_lowercase().as_str() {
-        "normal" => discord_ooh_bot::security::mode::RuntimeMode::Normal,
-        "observe-only" | "observe_only" => {
-            discord_ooh_bot::security::mode::RuntimeMode::ObserveOnly
-        }
-        "react-only" | "react_only" => discord_ooh_bot::security::mode::RuntimeMode::ReactOnly,
-        "audit-only" | "audit_only" => discord_ooh_bot::security::mode::RuntimeMode::AuditOnly,
-        "full-disable" | "full_disable" => {
-            discord_ooh_bot::security::mode::RuntimeMode::FullDisable
-        }
+        "normal" => RuntimeMode::Normal,
+        "observe-only" | "observe_only" => RuntimeMode::ObserveOnly,
+        "react-only" | "react_only" => RuntimeMode::ReactOnly,
+        "audit-only" | "audit_only" => RuntimeMode::AuditOnly,
+        "full-disable" | "full_disable" => RuntimeMode::FullDisable,
         _ => return Err(StartupError::InvalidEnv(name)),
     };
     Ok(Some(mode))
+}
+
+fn read_env_u32(name: &'static str, default: u32) -> Result<u32, StartupError> {
+    match std::env::var(name) {
+        Ok(value) => value.parse::<u32>().map_err(|_| StartupError::InvalidEnv(name)),
+        Err(_) => Ok(default),
+    }
+}
+
+fn read_env_u8(name: &'static str, default: u8) -> Result<u8, StartupError> {
+    match std::env::var(name) {
+        Ok(value) => value.parse::<u8>().map_err(|_| StartupError::InvalidEnv(name)),
+        Err(_) => Ok(default),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Mutex, OnceLock};
+
+    use super::{load_session_budget, read_env_u32, read_env_u8, StartupError};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn rejects_u8_overflow_in_env() {
+        let _guard = match env_lock().lock() {
+            Ok(guard) => guard,
+            Err(err) => panic!("env lock poisoned: {err}"),
+        };
+        let key = "OO_MAX_ACTIONS_PER_MESSAGE_TEST";
+        std::env::set_var(key, "256");
+        let parsed = read_env_u8(key, 1);
+        std::env::remove_var(key);
+
+        assert!(matches!(parsed, Err(StartupError::InvalidEnv("OO_MAX_ACTIONS_PER_MESSAGE_TEST"))));
+    }
+
+    #[test]
+    fn rejects_u32_overflow_in_env() {
+        let _guard = match env_lock().lock() {
+            Ok(guard) => guard,
+            Err(err) => panic!("env lock poisoned: {err}"),
+        };
+        let key = "OO_GLOBAL_RATE_BURST_TEST";
+        std::env::set_var(key, "4294967296");
+        let parsed = read_env_u32(key, 1);
+        std::env::remove_var(key);
+
+        assert!(matches!(parsed, Err(StartupError::InvalidEnv("OO_GLOBAL_RATE_BURST_TEST"))));
+    }
+
+    #[test]
+    fn rejects_budget_remaining_above_total() {
+        let _guard = match env_lock().lock() {
+            Ok(guard) => guard,
+            Err(err) => panic!("env lock poisoned: {err}"),
+        };
+        std::env::set_var("OO_SESSION_BUDGET_TOTAL", "5");
+        std::env::set_var("OO_SESSION_BUDGET_REMAINING", "6");
+
+        let budget = load_session_budget();
+
+        std::env::remove_var("OO_SESSION_BUDGET_TOTAL");
+        std::env::remove_var("OO_SESSION_BUDGET_REMAINING");
+
+        assert!(matches!(budget, Err(StartupError::InvalidEnv("OO_SESSION_BUDGET_REMAINING"))));
+    }
 }

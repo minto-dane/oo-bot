@@ -1,4 +1,4 @@
-use discord_ooh_bot::{
+use discord_oo_bot::{
     app::analyze_message::{BotAction, BotConfig},
     domain::kanji_matcher::{KanjiOoDb, KanjiOoDbMetadata},
     sandbox::abi::{
