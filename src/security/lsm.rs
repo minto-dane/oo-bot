@@ -85,7 +85,9 @@ fn detect_apparmor(status: &mut LsmStatus) {
         Ok(raw) => {
             status.apparmor_enabled = Some(raw.trim() == "Y");
         }
-        Err(err) => status.warnings.push(format!("failed to read AppArmor module enabled status: {err}")),
+        Err(err) => {
+            status.warnings.push(format!("failed to read AppArmor module enabled status: {err}"))
+        }
     }
 }
 

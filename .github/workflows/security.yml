@@ -5,38 +5,87 @@ on:
   schedule:
     - cron: "0 3 * * 1"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
+  rolling-toolchain-canary:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, nightly]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - run: cargo +${{ matrix.toolchain }} check --workspace --all-features
+      - run: cargo +${{ matrix.toolchain }} test --workspace --all-features --lib
+
   hardened-x64-verify:
     runs-on: ubuntu-latest
     continue-on-error: true
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly-2026-03-15
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
         with:
+          toolchain: nightly-2026-03-15
           components: rust-src
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - run: ./scripts/build_hardened_x64.sh
+      - run: ./scripts/verify_hardening.sh target/x86_64-unknown-linux-gnu/release/oo-bot hardened-x64
+
+  rolling-nightly-hardened-x64-canary:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
+        with:
+          toolchain: nightly
+          components: rust-src
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - run: cargo +nightly target add x86_64-unknown-linux-gnu
+      - run: cargo +nightly build --release --target x86_64-unknown-linux-gnu
+        env:
+          OO_HARDENED_X64: "1"
+          RUSTFLAGS: -Zcf-protection=full -C stack-protector=strong -C link-arg=-Wl,-z,relro,-z,now
       - run: ./scripts/verify_hardening.sh target/x86_64-unknown-linux-gnu/release/oo-bot hardened-x64
 
   miri:
     runs-on: ubuntu-latest
     continue-on-error: true
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
         with:
+          toolchain: nightly
           components: miri
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - run: cargo +nightly miri test --workspace
 
   fuzz-smoke:
     runs-on: ubuntu-latest
     continue-on-error: true
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - uses: taiki-e/install-action@7a4939c09608b2a1986b484eca1d16fd0db8ebef # v2
         with:
           tool: cargo-fuzz
       - run: cargo fuzz run analyze_message -- -max_total_time=20
@@ -46,10 +95,14 @@ jobs:
   mutation:
     runs-on: ubuntu-latest
     continue-on-error: true
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - uses: taiki-e/install-action@7a4939c09608b2a1986b484eca1d16fd0db8ebef # v2
         with:
           tool: cargo-mutants
       - run: cargo mutants --test-tool=nextest --timeout=120
@@ -57,8 +110,12 @@ jobs:
   bench-sanity:
     runs-on: ubuntu-latest
     continue-on-error: true
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - run: cargo bench --bench oo_count_bench -- --warm-up-time 0.1 --measurement-time 0.2
       - run: cargo bench --bench runtime_protection_bench -- --warm-up-time 0.1 --measurement-time 0.2
