@@ -1,8 +1,10 @@
+use std::sync::OnceLock;
+
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
 use crate::domain::detector::{
-    DetectionReport, DetectorPolicy, MessageDetector, MorphologicalReadingDetector,
+    DetectionReport, DetectorBackendKind, DetectorPolicy, MessageDetector, MorphologicalReadingDetector,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,13 +52,7 @@ pub fn analyze_message(
     author_is_bot: bool,
     config: &BotConfig,
 ) -> BotAction {
-    match MorphologicalReadingDetector::new(DetectorPolicy::default()) {
-        Ok(detector) => analyze_message_with_detector(content, author_is_bot, config, &detector),
-        Err(err) => {
-            error!(error = %err, "failed to initialize MorphologicalReadingDetector; falling back to BotAction::Noop");
-            BotAction::Noop
-        }
-    }
+    analyze_message_with_detector(content, author_is_bot, config, default_detector())
 }
 
 #[must_use]
@@ -139,6 +135,44 @@ fn enforce_action_policy(action: BotAction, config: &BotConfig) -> BotAction {
     }
 }
 
+fn default_detector() -> &'static (dyn MessageDetector + Send + Sync) {
+    static DETECTOR: OnceLock<Box<dyn MessageDetector + Send + Sync>> = OnceLock::new();
+
+    DETECTOR
+        .get_or_init(|| match MorphologicalReadingDetector::new(DetectorPolicy::default()) {
+            Ok(detector) => Box::new(detector),
+            Err(err) => {
+                error!(
+                    error = %err,
+                    "failed to initialize MorphologicalReadingDetector; falling back to no-hit detector"
+                );
+                Box::new(NoHitDetector)
+            }
+        })
+        .as_ref()
+}
+
+struct NoHitDetector;
+
+impl MessageDetector for NoHitDetector {
+    fn backend_kind(&self) -> DetectorBackendKind {
+        DetectorBackendKind::Fallback
+    }
+
+    fn detect(&self, _content: &str) -> DetectionReport {
+        DetectionReport {
+            backend: DetectorBackendKind::Fallback,
+            matched_backend: "fallback",
+            matched_readings: Vec::new(),
+            sequence_hits: 0,
+            kanji_hits: 0,
+            total_count: 0,
+            special_phrase_hit: false,
+            token_count: 0,
+        }
+    }
+}
+
 fn render_send_template(config: &BotConfig, count: usize, report: &DetectionReport) -> Option<String> {
     let mut output = config.send_template.clone();
 
@@ -186,7 +220,7 @@ fn sanitize_template_value(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{analyze_message, ActionPolicy, BotAction, BotConfig};
+    use super::{analyze_message, default_detector, ActionPolicy, BotAction, BotConfig};
 
     #[test]
     fn special_phrase_has_priority() {
@@ -224,5 +258,12 @@ mod tests {
         };
         let action = analyze_message("おおoo", false, &cfg);
         assert!(matches!(action, BotAction::React { .. }));
+    }
+
+    #[test]
+    fn analyze_message_reuses_default_detector_instance() {
+        let first = default_detector() as *const _;
+        let second = default_detector() as *const _;
+        assert_eq!(first, second);
     }
 }
