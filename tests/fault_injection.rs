@@ -1,6 +1,5 @@
 use discord_oo_bot::{
     app::analyze_message::{BotAction, BotConfig},
-    domain::kanji_matcher::{KanjiOoDb, KanjiOoDbMetadata},
     sandbox::abi::{
         ActionProposal, AnalyzerError, AnalyzerRequest, ProposalAnalyzer, SANDBOX_ABI_VERSION,
     },
@@ -9,18 +8,6 @@ use discord_oo_bot::{
         mode::RuntimeMode,
     },
 };
-
-const TEST_DB: KanjiOoDb = KanjiOoDb::new(
-    &['大' as u32],
-    KanjiOoDbMetadata {
-        source_name: "test",
-        source_sha256: "test",
-        total_chars: 1,
-        ja_kun_hits: 1,
-        nanori_hits: 0,
-        ja_on_hits: 0,
-    },
-);
 
 #[derive(Debug, Clone, Copy)]
 enum FailureKind {
@@ -81,7 +68,6 @@ fn analyzer_trap_does_not_produce_outbound_action() {
         Box::new(FailingAnalyzer { kind: FailureKind::Trap }),
         BotConfig::default(),
         runtime_cfg(),
-        &TEST_DB,
     );
 
     let decision = core.decide_message(ctx(1), "oo");
@@ -94,7 +80,6 @@ fn repeated_analyzer_failures_degrade_mode_to_audit_only() {
         Box::new(FailingAnalyzer { kind: FailureKind::Timeout }),
         BotConfig::default(),
         runtime_cfg(),
-        &TEST_DB,
     );
 
     let first = core.decide_message(ctx(10), "oo");
@@ -116,7 +101,6 @@ fn invalid_config_kill_switch_forces_full_disable() {
         Box::new(FailingAnalyzer { kind: FailureKind::AbiMismatch }),
         BotConfig::default(),
         cfg,
-        &TEST_DB,
     );
 
     let decision = core.decide_message(ctx(99), "oo");

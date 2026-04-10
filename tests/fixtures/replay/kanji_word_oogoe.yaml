@@ -1,0 +1,8 @@
+name: kanji_word_oogoe
+content: "大声"
+author_is_bot: false
+expected:
+  type: react
+  emoji_id: 1489695886773587978
+  emoji_name: Omilfy
+  animated: false

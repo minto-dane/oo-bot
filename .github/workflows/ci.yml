@@ -30,6 +30,34 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --workspace --all-features
 
+  stable-build-verification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --workspace
+      - run: ./scripts/verify_hardening.sh target/release/oo-bot stable
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stable-build-artifacts
+          path: |
+            target/release/oo-bot
+
+  nightly-hardened-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly-2026-03-15
+        with:
+          components: rust-src
+      - run: ./scripts/build_hardened_x64.sh
+      - run: ./scripts/verify_hardening.sh target/x86_64-unknown-linux-gnu/release/oo-bot hardened-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hardened-x64-build-artifacts
+          path: |
+            target/x86_64-unknown-linux-gnu/release/oo-bot
+
   runtime-protection:
     runs-on: ubuntu-latest
     steps:
@@ -111,13 +139,16 @@ jobs:
       - run: cargo hack check --workspace --no-dev-deps --each-feature
       - run: cargo check --workspace --all-features
 
-  deterministic-db:
+  canonical-config-and-artifacts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo xtask generate
-      - run: git diff --exit-code -- src/generated/kanji_oo_db.rs data/generated/kanji_oo_db_meta.json
+      - run: cargo test --test defaults_canonical --all-features
+      - run: test -f deploy/systemd/oo-bot.service
+      - run: test -f deploy/apparmor/oo-bot.apparmor
+      - run: test -f deploy/selinux/oo_bot.te
+      - run: grep -q "profile oo-bot" deploy/apparmor/oo-bot.apparmor
 
   docs-and-readme:
     runs-on: ubuntu-latest

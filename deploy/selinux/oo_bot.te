@@ -1,0 +1,20 @@
+module oo_bot 1.0;
+
+require {
+  type init_t;
+  type var_lib_t;
+  type etc_t;
+  class file { read open getattr write append create setattr };
+  class dir { search add_name write remove_name read getattr open };
+  class process { transition }; 
+  class tcp_socket { name_connect };
+}
+
+type oo_bot_t;
+type oo_bot_exec_t;
+init_daemon_domain(oo_bot_t, oo_bot_exec_t);
+
+allow oo_bot_t etc_t:file { open read getattr };
+allow oo_bot_t var_lib_t:dir { search open read getattr add_name write };
+allow oo_bot_t var_lib_t:file { open read write append create getattr setattr };
+allow oo_bot_t self:tcp_socket name_connect;

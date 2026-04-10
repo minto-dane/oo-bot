@@ -1,6 +1,5 @@
 use discord_oo_bot::{
     app::analyze_message::{BotAction, BotConfig},
-    generated::kanji_oo_db::KANJI_OO_DB,
     sandbox::host::{SandboxConfig, WasmtimeSandboxAnalyzer},
     security::{
         core_governor::{MessageContext, RuntimeProtectionConfig, TrustedCore},
@@ -30,7 +29,7 @@ fn core_with_default() -> TrustedCore {
         ..RuntimeProtectionConfig::default()
     };
 
-    TrustedCore::new(Box::new(analyzer), BotConfig::default(), cfg, &KANJI_OO_DB)
+    TrustedCore::new(Box::new(analyzer), BotConfig::default(), cfg)
 }
 
 #[test]
@@ -45,7 +44,10 @@ fn duplicate_message_is_suppressed() {
     let mut core = core_with_default();
 
     let first = core.decide_message(test_context(100), "oo");
-    assert!(matches!(first.action, BotAction::React { .. }));
+    assert!(matches!(
+        first.action,
+        BotAction::React { .. } | BotAction::SendMessage { .. }
+    ));
 
     let second = core.decide_message(test_context(100), "oo");
     assert_eq!(second.action, BotAction::Noop);
@@ -65,7 +67,7 @@ fn breaker_forces_observe_only() {
         ..RuntimeProtectionConfig::default()
     };
 
-    let mut core = TrustedCore::new(Box::new(analyzer), BotConfig::default(), cfg, &KANJI_OO_DB);
+    let mut core = TrustedCore::new(Box::new(analyzer), BotConfig::default(), cfg);
     core.record_http_status(429);
     core.record_http_status(429);
 
@@ -88,7 +90,7 @@ fn react_only_mode_is_honored() {
         ..RuntimeProtectionConfig::default()
     };
 
-    let mut core = TrustedCore::new(Box::new(analyzer), BotConfig::default(), cfg, &KANJI_OO_DB);
+    let mut core = TrustedCore::new(Box::new(analyzer), BotConfig::default(), cfg);
 
     let decision = core.decide_message(test_context(3), "oooo");
     assert_eq!(decision.mode, RuntimeMode::ReactOnly);

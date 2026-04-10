@@ -16,7 +16,7 @@ test:
     cargo test --workspace --all-features
 
 integration:
-    cargo test --test analyze_message_integration --test replay_harness --test replay_suppress_reason_regression --test generated_db --test runtime_protection_integration --all-features
+    cargo test --test analyze_message_integration --test replay_harness --test replay_suppress_reason_regression --test runtime_protection_integration --all-features
 
 runtime-smoke:
     cargo test --test runtime_protection_integration --test replay_harness --test replay_suppress_reason_regression --all-features
@@ -51,17 +51,20 @@ minimal-features:
 all-features:
     cargo check --workspace --all-features
 
-generate-db:
-    cargo xtask generate
-
-verify-generated:
-    cargo xtask verify
+verify-canonical-config:
+    cargo test --test defaults_canonical --all-features
 
 docs:
     RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps
 
 replay:
     cargo run --bin replay -- tests/fixtures/replay
+
+hardened-x64:
+    ./scripts/build_hardened_x64.sh
+
+verify-hardening:
+    ./scripts/verify_hardening.sh target/release/oo-bot stable
 
 fuzz-smoke:
     cargo fuzz run analyze_message -- -max_total_time=10
@@ -80,4 +83,4 @@ udeps:
 
 security-local: audit deny geiger semgrep
 
-ci-local: fmt-check clippy test integration runtime-smoke fault-inject nextest coverage audit deny geiger semgrep minimal-features all-features verify-generated docs replay
+ci-local: fmt-check clippy test integration runtime-smoke fault-inject nextest coverage audit deny geiger semgrep minimal-features all-features verify-canonical-config docs replay

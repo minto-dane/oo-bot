@@ -4,7 +4,7 @@
 
 - Discord Gateway/REST が提供される
 - token は運用基盤で安全に管理される
-- KANJIDIC2 ライセンス要件が満たされる
+- Lindera 埋め込み辞書が実行環境で利用可能である
 - replay/fault-injection が release 前に実行される
 
 ## Non-goals

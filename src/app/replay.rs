@@ -10,7 +10,6 @@ use thiserror::Error;
 
 use crate::{
     app::analyze_message::{analyze_message, BotAction, BotConfig},
-    domain::kanji_matcher::KanjiOoDb,
     sandbox::{
         abi::{ActionProposal, AnalyzerError, AnalyzerRequest, ProposalAnalyzer},
         host::{SandboxConfig, WasmtimeSandboxAnalyzer},
@@ -125,9 +124,8 @@ pub fn load_replay_cases(path: &Path) -> Result<Vec<ReplayCase>, ReplayError> {
 pub fn run_replay_case(
     case: &ReplayCase,
     config: &BotConfig,
-    db: &KanjiOoDb,
 ) -> Result<(), String> {
-    let actual = analyze_message(&case.content, case.author_is_bot, config, db);
+    let actual = analyze_message(&case.content, case.author_is_bot, config);
     let expected = case.expected.clone();
     let actual_as_expected: ExpectedAction = actual.into();
 
@@ -202,7 +200,7 @@ pub fn run_replay_case_with_core(case: &ReplayCase, core: &mut TrustedCore) -> R
     Ok(())
 }
 
-pub fn build_replay_core(config: BotConfig, db: &'static KanjiOoDb) -> Result<TrustedCore, String> {
+pub fn build_replay_core(config: BotConfig) -> Result<TrustedCore, String> {
     let analyzer = WasmtimeSandboxAnalyzer::new(SandboxConfig {
         fuel_limit: 800_000,
         ..SandboxConfig::default()
@@ -225,7 +223,6 @@ pub fn build_replay_core(config: BotConfig, db: &'static KanjiOoDb) -> Result<Tr
         Box::new(ReplayHarnessAnalyzer { inner: analyzer }),
         config,
         runtime_cfg,
-        db,
     ))
 }
 

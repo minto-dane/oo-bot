@@ -1,0 +1,68 @@
+detector:
+  backend: morphological_reading
+  target_readings:
+    - "おお"
+    - "オオ"
+    - "oo"
+  literal_sequence_patterns:
+    - "おお"
+    - "オオ"
+    - "oo"
+  special_phrases:
+    - "これはおお"
+
+bot:
+  stamp_text: "<:Omilfy:1489695886773587978>"
+  send_template: "${stamp}"
+  reaction:
+    emoji_id: 1489695886773587978
+    emoji_name: "Omilfy"
+    animated: false
+  max_count_cap: 48
+  max_send_chars: 1900
+  action_policy: react_or_send
+
+runtime:
+  duplicate_ttl_ms: 180000
+  duplicate_cache_cap: 8192
+  per_user_cooldown_ms: 900
+  per_channel_cooldown_ms: 400
+  per_guild_cooldown_ms: 250
+  global_cooldown_ms: 100
+  global_rate_per_sec: 20.0
+  global_rate_burst: 30
+  max_actions_per_message: 1
+  max_send_chars: 1900
+  long_message_soft_chars: 2000
+  long_message_hard_chars: 8000
+  suspicious_repetition_threshold: 256
+  breaker_window_ms: 60000
+  breaker_threshold: 64
+  breaker_open_ms: 120000
+  sandbox_failure_window_ms: 30000
+  sandbox_failure_threshold: 10
+  allow_guild_ids: []
+  deny_guild_ids: []
+  allow_channel_ids: []
+  deny_channel_ids: []
+  mode_override: null
+  emergency_kill_switch: false
+  session_budget_low_watermark: 5
+
+audit:
+  sqlite_path: "state/audit/events.sqlite3"
+  export_max_rows: 50000
+  query_max_rows: 10000
+  busy_timeout_ms: 3000
+
+diagnostics:
+  local_self_check_on_startup: true
+  verify_hardening_artifacts: true
+  verify_generated_artifacts: true
+  audit_verify_max_rows: 512
+  security_snapshot_path: "state/security/offline-security-report.json"
+  dependency_security_check_mode: offline_snapshot
+
+integrity:
+  config_signature: null
+  pseudo_id_hmac_key_env: "OO_PSEUDO_ID_HMAC_KEY"

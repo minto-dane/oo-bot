@@ -2,7 +2,7 @@
 
 ## 目的
 
-token・設定・生成物不整合に対する復旧手順を定義します。
+token・設定・監査DB不整合に対する復旧手順を定義します。
 
 ## Token Rotation
 
@@ -18,11 +18,11 @@ token・設定・生成物不整合に対する復旧手順を定義します。
 2. 破損キーをデフォルトまたは正値へ復旧
 3. 起動前に `cargo run` で型検証
 
-## Generated DB Recovery
+## Canonical Config Recovery
 
-1. `cargo xtask generate`
-2. `cargo xtask verify`
-3. `git diff -- src/generated/kanji_oo_db.rs data/generated/kanji_oo_db_meta.json`
+1. `config/oo-bot.yaml` の YAML を修復、または `cargo run --bin oo-bot -- config init --force` で再生成
+2. 必要な運用値を `cargo run --bin oo-bot -- config setup` または YAML 直接編集で復元
+3. `cargo test --test defaults_canonical --all-features`
 4. replay smoke 実施
 
 ## Degraded Mode Recovery

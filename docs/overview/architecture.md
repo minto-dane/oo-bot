@@ -6,7 +6,7 @@
 
 ## システム要約
 
-このリポジトリは、Discord メッセージに対して oo 系シーケンスと単漢字読みを解析し、
+このリポジトリは、Discord メッセージに対して oo 系シーケンスと形態素読みを解析し、
 最終的にリアクションまたはメッセージ送信を決定する Bot です。
 
 主要な設計方針は以下です。
@@ -21,9 +21,9 @@
 - Entrypoint
   - [src/main.rs](../../src/main.rs)
 - Pure logic
+  - [src/domain/detector.rs](../../src/domain/detector.rs)
   - [src/domain/oo_counter.rs](../../src/domain/oo_counter.rs)
   - [src/domain/reading_normalizer.rs](../../src/domain/reading_normalizer.rs)
-  - [src/domain/kanji_matcher.rs](../../src/domain/kanji_matcher.rs)
   - [src/app/analyze_message.rs](../../src/app/analyze_message.rs)
 - Runtime protection (trusted core)
   - [src/security/core_governor.rs](../../src/security/core_governor.rs)
@@ -55,8 +55,6 @@ flowchart LR
   Handler --> REST[Discord REST]
 
   Replay[replay CLI/tests] --> Core
-  Gen[xtask generate] --> Generated[src/generated/kanji_oo_db.rs]
-  Generated --> Core
 ```
 
 ## Trust Boundary

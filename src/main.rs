@@ -1,17 +1,35 @@
 #![forbid(unsafe_code)]
 
+use std::io::{self, IsTerminal};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use clap::{Parser, Subcommand, ValueEnum};
 use discord_oo_bot::{
-    app::analyze_message::{BotConfig, ReactionConfig},
-    generated::kanji_oo_db::KANJI_OO_DB,
-    infra::discord_handler::Handler,
+    audit::{
+        AuditEventInput, AuditEventType, AuditQueryFilter, AuditStore, AuditStoreConfig,
+        ExportFormat,
+    },
+    config::{
+        ensure_startup_config_exists, load_startup_config_from_path, startup_config_path,
+        write_startup_config_to_path, StartupConfig, StartupConfigError,
+    },
+    domain::detector::build_detector,
+    infra::discord_handler::{Handler, HandlerRuntimeMeta},
+    operator_tui::{run_operator_tui, OperatorTuiEntry, OperatorTuiParams},
     sandbox::host::{SandboxConfig, WasmtimeSandboxAnalyzer},
-    security::core_governor::{RuntimeProtectionConfig, TrustedCore},
+    security::{
+        core_governor::TrustedCore,
+        hardening::detect_hardening_status,
+        lsm::detect_lsm_status,
+    },
 };
 use serenity::all::{Client, GatewayIntents};
-use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
+
+const TUI_AUDIT_LIMIT: usize = 200;
 
 #[derive(Debug, Error)]
 enum StartupError {
@@ -19,10 +37,156 @@ enum StartupError {
     MissingEnv(&'static str),
     #[error("invalid environment variable: {0}")]
     InvalidEnv(&'static str),
+    #[error("invalid startup config: {0}")]
+    InvalidStartupConfig(StartupConfigError),
+    #[error("detector init failed: {0}")]
+    DetectorInit(String),
     #[error("sandbox init failed: {0}")]
     SandboxInit(String),
     #[error("failed to create discord client: {0}")]
     ClientBuild(String),
+    #[error("audit command failed: {0}")]
+    AuditCommand(String),
+    #[error("config command failed: {0}")]
+    ConfigCommand(String),
+}
+
+#[derive(Debug, Parser)]
+#[command(name = "oo-bot")]
+#[command(about = "oo-bot runtime and audit CLI")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    Run,
+    Tui {
+        #[arg(value_enum, long, default_value_t = TuiEntryArg::Dashboard)]
+        page: TuiEntryArg,
+    },
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
+    },
+    Audit {
+        #[command(subcommand)]
+        command: AuditCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommands {
+    Init {
+        #[arg(long)]
+        force: bool,
+    },
+    Setup,
+    Edit,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum TuiEntryArg {
+    Dashboard,
+    Setup,
+    Diagnostics,
+    Audit,
+}
+
+impl From<TuiEntryArg> for OperatorTuiEntry {
+    fn from(value: TuiEntryArg) -> Self {
+        match value {
+            TuiEntryArg::Dashboard => OperatorTuiEntry::Dashboard,
+            TuiEntryArg::Setup => OperatorTuiEntry::Setup,
+            TuiEntryArg::Diagnostics => OperatorTuiEntry::Diagnostics,
+            TuiEntryArg::Audit => OperatorTuiEntry::Audit,
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum AuditCommands {
+    Tail {
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+        #[arg(long)]
+        start_ts_utc: Option<String>,
+        #[arg(long)]
+        end_ts_utc: Option<String>,
+        #[arg(long)]
+        event_type: Option<String>,
+        #[arg(long)]
+        detector_backend: Option<String>,
+        #[arg(long)]
+        suppressed_reason: Option<String>,
+        #[arg(long)]
+        mode: Option<String>,
+    },
+    Stats {
+        #[arg(long)]
+        start_ts_utc: Option<String>,
+        #[arg(long)]
+        end_ts_utc: Option<String>,
+        #[arg(long)]
+        event_type: Option<String>,
+        #[arg(long)]
+        detector_backend: Option<String>,
+        #[arg(long)]
+        suppressed_reason: Option<String>,
+        #[arg(long)]
+        mode: Option<String>,
+    },
+    Inspect {
+        event_id: i64,
+    },
+    Verify {
+        #[arg(long)]
+        start_event_id: Option<i64>,
+        #[arg(long)]
+        end_event_id: Option<i64>,
+    },
+    Export {
+        #[arg(long)]
+        format: AuditExportFormatArg,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long, default_value_t = 10_000)]
+        limit: usize,
+        #[arg(long)]
+        start_ts_utc: Option<String>,
+        #[arg(long)]
+        end_ts_utc: Option<String>,
+        #[arg(long)]
+        event_type: Option<String>,
+        #[arg(long)]
+        detector_backend: Option<String>,
+        #[arg(long)]
+        suppressed_reason: Option<String>,
+        #[arg(long)]
+        mode: Option<String>,
+    },
+    Tui {
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum AuditExportFormatArg {
+    Jsonl,
+    Csv,
+    Parquet,
+}
+
+impl From<AuditExportFormatArg> for ExportFormat {
+    fn from(value: AuditExportFormatArg) -> Self {
+        match value {
+            AuditExportFormatArg::Jsonl => ExportFormat::Jsonl,
+            AuditExportFormatArg::Csv => ExportFormat::Csv,
+            AuditExportFormatArg::Parquet => ExportFormat::Parquet,
+        }
+    }
 }
 
 #[tokio::main]
@@ -30,19 +194,103 @@ async fn main() -> Result<(), StartupError> {
     init_tracing();
     dotenvy::dotenv().ok();
 
+    let cli = Cli::parse();
+    match cli.command.unwrap_or(Commands::Run) {
+        Commands::Run => run_bot().await,
+        Commands::Tui { page } => run_tui_command(page),
+        Commands::Config { command } => run_config_command(command),
+        Commands::Audit { command } => run_audit_command(command),
+    }
+}
+
+async fn run_bot() -> Result<(), StartupError> {
+    let startup = prepare_startup_config(true)?;
     let token =
         std::env::var("DISCORD_TOKEN").map_err(|_| StartupError::MissingEnv("DISCORD_TOKEN"))?;
     validate_discord_token(&token)?;
 
-    let config = load_bot_config()?;
-    let runtime_cfg = load_runtime_config()?;
-    let sandbox_cfg = load_sandbox_config()?;
+    let detector = build_detector(startup.app.detector.backend, startup.app.detector.as_policy())
+        .map_err(StartupError::DetectorInit)?;
+    let bot_config = startup.app.bot.as_bot_config(&startup.app.detector);
+    let runtime_cfg = startup.app.runtime.clone();
 
+    let sandbox_cfg = load_sandbox_config()?;
     let analyzer = WasmtimeSandboxAnalyzer::new(sandbox_cfg).map_err(StartupError::SandboxInit)?;
-    let mut core = TrustedCore::new(Box::new(analyzer), config, runtime_cfg, &KANJI_OO_DB);
+
+    let mut core = TrustedCore::new_with_detector(
+        Box::new(analyzer),
+        detector,
+        bot_config,
+        runtime_cfg,
+    );
 
     let (budget_total, budget_remaining, budget_reset_after) = load_session_budget()?;
     core.update_session_budget(budget_total, budget_remaining, budget_reset_after);
+
+    let lsm_status = detect_lsm_status();
+    let hardening_status = detect_hardening_status();
+
+    for warning in &lsm_status.warnings {
+        warn!(warning = warning, "lsm detection warning");
+    }
+    for warning in &hardening_status.warnings {
+        warn!(warning = warning, "hardening status warning");
+    }
+
+    let active_lsm = lsm_status.active_lsm_summary();
+    let hardening_summary = hardening_status.summary();
+
+    info!(
+        config_fingerprint = %startup.config_fingerprint,
+        detector_backend = ?startup.app.detector.backend,
+        active_lsm = %active_lsm,
+        hardening_status = %hardening_summary,
+        "startup profile"
+    );
+
+    let audit_cfg = AuditStoreConfig {
+        sqlite_path: startup.app.audit.sqlite_path.clone(),
+        busy_timeout_ms: startup.app.audit.busy_timeout_ms,
+        export_max_rows: startup.app.audit.export_max_rows,
+        query_max_rows: startup.app.audit.query_max_rows,
+    };
+
+    let audit_store = match AuditStore::open_rw(&audit_cfg, startup.pseudo_id_hmac_key.clone()) {
+        Ok(mut store) => {
+            let mut redacted_config = startup.app.clone();
+            if let Some(signature) = redacted_config.integrity.config_signature.as_mut() {
+                signature.hmac_key_env = "<redacted>".to_string();
+            }
+            if let Some(key_env) = redacted_config.integrity.pseudo_id_hmac_key_env.as_mut() {
+                *key_env = "<redacted>".to_string();
+            }
+
+            let config_json = serde_json::to_string(&redacted_config)
+                .map_err(|err| StartupError::AuditCommand(err.to_string()))?;
+            if let Err(err) = store.record_config_snapshot(&startup.config_fingerprint, &config_json) {
+                warn!(error = %err, "failed to record config snapshot");
+            }
+
+            let event = AuditEventInput {
+                event_type: AuditEventType::ProcessStart,
+                binary_version: env!("CARGO_PKG_VERSION").to_string(),
+                config_fingerprint: startup.config_fingerprint.clone(),
+                detector_backend: format!("{:?}", startup.app.detector.backend),
+                active_lsm: active_lsm.clone(),
+                hardening_status: hardening_summary.clone(),
+                ..AuditEventInput::default()
+            };
+            if let Err(err) = store.record_event(&event) {
+                warn!(error = %err, "failed to record process_start audit event");
+            }
+
+            Some(Arc::new(Mutex::new(store)))
+        }
+        Err(err) => {
+            warn!(error = %err, "audit store unavailable; continuing without sqlite audit write path");
+            None
+        }
+    };
 
     if core.session_budget_low() {
         info!(remaining = budget_remaining, "session budget low: starting in degraded posture");
@@ -55,7 +303,16 @@ async fn main() -> Result<(), StartupError> {
         | GatewayIntents::MESSAGE_CONTENT;
 
     let mut client = Client::builder(token, intents)
-        .event_handler(Handler { core: shared_core })
+        .event_handler(Handler {
+            core: shared_core,
+            audit: audit_store.clone(),
+            runtime_meta: HandlerRuntimeMeta {
+                binary_version: env!("CARGO_PKG_VERSION").to_string(),
+                config_fingerprint: startup.config_fingerprint.clone(),
+                active_lsm,
+                hardening_status: hardening_summary,
+            },
+        })
         .await
         .map_err(|err| StartupError::ClientBuild(err.to_string()))?;
 
@@ -63,45 +320,244 @@ async fn main() -> Result<(), StartupError> {
     if let Err(err) = client.start().await {
         error!(error = %err, "discord client stopped with error");
     }
+
+    if let Some(store) = audit_store {
+        let mut guard = match store.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let event = AuditEventInput {
+            event_type: AuditEventType::ProcessShutdown,
+            binary_version: env!("CARGO_PKG_VERSION").to_string(),
+            config_fingerprint: startup.config_fingerprint,
+            ..AuditEventInput::default()
+        };
+        if let Err(err) = guard.record_event(&event) {
+            warn!(error = %err, "failed to record process_shutdown audit event");
+        }
+    }
+
     Ok(())
 }
 
-fn load_runtime_config() -> Result<RuntimeProtectionConfig, StartupError> {
-    let mut cfg = RuntimeProtectionConfig::default();
-    cfg.duplicate_ttl_ms = read_env_u64("OO_DUPLICATE_TTL_MS", cfg.duplicate_ttl_ms)?;
-    cfg.duplicate_cache_cap = read_env_usize("OO_DUPLICATE_CACHE_CAP", cfg.duplicate_cache_cap)?;
-    cfg.per_user_cooldown_ms = read_env_u64("OO_COOLDOWN_USER_MS", cfg.per_user_cooldown_ms)?;
-    cfg.per_channel_cooldown_ms =
-        read_env_u64("OO_COOLDOWN_CHANNEL_MS", cfg.per_channel_cooldown_ms)?;
-    cfg.per_guild_cooldown_ms = read_env_u64("OO_COOLDOWN_GUILD_MS", cfg.per_guild_cooldown_ms)?;
-    cfg.global_cooldown_ms = read_env_u64("OO_COOLDOWN_GLOBAL_MS", cfg.global_cooldown_ms)?;
-    cfg.global_rate_per_sec = read_env_f64("OO_GLOBAL_RATE_PER_SEC", cfg.global_rate_per_sec)?;
-    cfg.global_rate_burst = read_env_u32("OO_GLOBAL_RATE_BURST", cfg.global_rate_burst)?;
-    cfg.max_actions_per_message =
-        read_env_u8("OO_MAX_ACTIONS_PER_MESSAGE", cfg.max_actions_per_message)?;
-    cfg.max_send_chars = read_env_usize("OO_MAX_SEND_CHARS", cfg.max_send_chars)?;
-    cfg.long_message_soft_chars =
-        read_env_usize("OO_LONG_MESSAGE_SOFT_CHARS", cfg.long_message_soft_chars)?;
-    cfg.long_message_hard_chars =
-        read_env_usize("OO_LONG_MESSAGE_HARD_CHARS", cfg.long_message_hard_chars)?;
-    cfg.suspicious_repetition_threshold =
-        read_env_usize("OO_SUSPICIOUS_REPETITION_THRESHOLD", cfg.suspicious_repetition_threshold)?;
-    cfg.breaker_window_ms = read_env_u64("OO_BREAKER_WINDOW_MS", cfg.breaker_window_ms)?;
-    cfg.breaker_threshold = read_env_usize("OO_BREAKER_THRESHOLD", cfg.breaker_threshold)?;
-    cfg.breaker_open_ms = read_env_u64("OO_BREAKER_OPEN_MS", cfg.breaker_open_ms)?;
-    cfg.sandbox_failure_window_ms =
-        read_env_u64("OO_SANDBOX_FAILURE_WINDOW_MS", cfg.sandbox_failure_window_ms)?;
-    cfg.sandbox_failure_threshold =
-        read_env_usize("OO_SANDBOX_FAILURE_THRESHOLD", cfg.sandbox_failure_threshold)?;
-    cfg.session_budget_low_watermark =
-        read_env_u32("OO_SESSION_BUDGET_LOW_WATERMARK", cfg.session_budget_low_watermark)?;
-    cfg.emergency_kill_switch = read_env_bool("OO_EMERGENCY_KILL_SWITCH", false)?;
-    cfg.allow_guild_ids = read_env_id_list("OO_ALLOW_GUILD_IDS")?;
-    cfg.deny_guild_ids = read_env_id_list("OO_DENY_GUILD_IDS")?;
-    cfg.allow_channel_ids = read_env_id_list("OO_ALLOW_CHANNEL_IDS")?;
-    cfg.deny_channel_ids = read_env_id_list("OO_DENY_CHANNEL_IDS")?;
-    cfg.mode_override = read_env_mode_override("OO_MODE_OVERRIDE")?;
-    Ok(cfg)
+fn run_audit_command(command: AuditCommands) -> Result<(), StartupError> {
+    let startup = prepare_startup_config(false)?;
+
+    if let AuditCommands::Tui { limit } = command {
+        let _ = run_operator_tui(
+            OperatorTuiEntry::Audit,
+            OperatorTuiParams {
+                startup,
+                startup_created: false,
+                audit_limit: limit,
+            },
+        )
+        .map_err(StartupError::AuditCommand)?;
+        return Ok(());
+    }
+
+    let cfg = AuditStoreConfig {
+        sqlite_path: startup.app.audit.sqlite_path,
+        busy_timeout_ms: startup.app.audit.busy_timeout_ms,
+        export_max_rows: startup.app.audit.export_max_rows,
+        query_max_rows: startup.app.audit.query_max_rows,
+    };
+
+    let store = AuditStore::open_ro(&cfg).map_err(StartupError::AuditCommand)?;
+
+    match command {
+        AuditCommands::Tail {
+            limit,
+            start_ts_utc,
+            end_ts_utc,
+            event_type,
+            detector_backend,
+            suppressed_reason,
+            mode,
+        } => {
+            let filter = AuditQueryFilter {
+                start_ts_utc,
+                end_ts_utc,
+                event_type,
+                detector_backend,
+                suppressed_reason,
+                mode,
+                limit: Some(limit),
+            };
+            let rows = store.tail(&filter).map_err(StartupError::AuditCommand)?;
+            for row in rows {
+                println!(
+                    "{} {} backend={} action={} reason={} mode={} hash={}",
+                    row.event_id,
+                    row.event_type,
+                    row.detector_backend,
+                    row.selected_action,
+                    if row.suppressed_reason.is_empty() {
+                        "-"
+                    } else {
+                        row.suppressed_reason.as_str()
+                    },
+                    row.mode,
+                    row.row_hash
+                );
+            }
+        }
+        AuditCommands::Stats {
+            start_ts_utc,
+            end_ts_utc,
+            event_type,
+            detector_backend,
+            suppressed_reason,
+            mode,
+        } => {
+            let filter = AuditQueryFilter {
+                start_ts_utc,
+                end_ts_utc,
+                event_type,
+                detector_backend,
+                suppressed_reason,
+                mode,
+                limit: None,
+            };
+            let stats = store.stats(&filter).map_err(StartupError::AuditCommand)?;
+            println!("total={}", stats.total);
+            println!("by_event_type={}", serde_json::to_string(&stats.by_event_type).unwrap_or_default());
+            println!("by_backend={}", serde_json::to_string(&stats.by_backend).unwrap_or_default());
+            println!(
+                "by_suppressed_reason={}",
+                serde_json::to_string(&stats.by_suppressed_reason).unwrap_or_default()
+            );
+            println!("by_mode={}", serde_json::to_string(&stats.by_mode).unwrap_or_default());
+        }
+        AuditCommands::Inspect { event_id } => {
+            let row = store.inspect(event_id).map_err(StartupError::AuditCommand)?;
+            match row {
+                Some(row) => {
+                    println!("{}", serde_json::to_string_pretty(&row).unwrap_or_default());
+                }
+                None => {
+                    println!("event not found: {event_id}");
+                }
+            }
+        }
+        AuditCommands::Verify {
+            start_event_id,
+            end_event_id,
+        } => {
+            let report = store
+                .verify(start_event_id, end_event_id)
+                .map_err(StartupError::AuditCommand)?;
+            println!("checked_rows={}", report.checked_rows);
+            println!("broken_rows={}", report.broken_rows);
+            for detail in report.details {
+                println!("detail={detail}");
+            }
+        }
+        AuditCommands::Export {
+            format,
+            out,
+            limit,
+            start_ts_utc,
+            end_ts_utc,
+            event_type,
+            detector_backend,
+            suppressed_reason,
+            mode,
+        } => {
+            let filter = AuditQueryFilter {
+                start_ts_utc,
+                end_ts_utc,
+                event_type,
+                detector_backend,
+                suppressed_reason,
+                mode,
+                limit: Some(limit),
+            };
+            let count = store
+                .export(format.into(), &out, &filter)
+                .map_err(StartupError::AuditCommand)?;
+            println!("exported_rows={count}");
+            println!("output={}", out.display());
+        }
+        AuditCommands::Tui { .. } => unreachable!("tui handled before store open"),
+    }
+
+    Ok(())
+}
+
+fn run_tui_command(page: TuiEntryArg) -> Result<(), StartupError> {
+    let (startup, created) = prepare_startup_config_with_creation(false)?;
+    let _ = run_operator_tui(
+        page.into(),
+        OperatorTuiParams {
+            startup,
+            startup_created: created,
+            audit_limit: TUI_AUDIT_LIMIT,
+        },
+    )
+    .map_err(StartupError::ConfigCommand)?;
+    Ok(())
+}
+
+fn run_config_command(command: ConfigCommands) -> Result<(), StartupError> {
+    let path = startup_config_path();
+
+    match command {
+        ConfigCommands::Init { force } => {
+            if path.exists() && !force {
+                println!("config already exists: {}", path.display());
+                println!("use --force to overwrite it");
+                return Ok(());
+            }
+
+            let config = StartupConfig::default();
+            write_startup_config_to_path(&path, &config)
+                .map_err(StartupError::InvalidStartupConfig)?;
+            println!("wrote config: {}", path.display());
+        }
+        ConfigCommands::Setup | ConfigCommands::Edit => {
+            let (startup, created) = prepare_startup_config_with_creation(false)?;
+            let _ = run_operator_tui(
+                OperatorTuiEntry::Setup,
+                OperatorTuiParams {
+                    startup: startup.clone(),
+                    startup_created: created,
+                    audit_limit: TUI_AUDIT_LIMIT,
+                },
+            )
+            .map_err(StartupError::ConfigCommand)?;
+            println!("setup closed: {}", startup.config_path.display());
+        }
+    }
+
+    Ok(())
+}
+
+fn prepare_startup_config(launch_tui_on_first_run: bool) -> Result<discord_oo_bot::config::LoadedStartupConfig, StartupError> {
+    prepare_startup_config_with_creation(launch_tui_on_first_run).map(|(startup, _)| startup)
+}
+
+fn prepare_startup_config_with_creation(
+    launch_tui_on_first_run: bool,
+) -> Result<(discord_oo_bot::config::LoadedStartupConfig, bool), StartupError> {
+    let path = startup_config_path();
+    let created = ensure_startup_config_exists(&path).map_err(StartupError::InvalidStartupConfig)?;
+    let mut startup = load_startup_config_from_path(&path).map_err(StartupError::InvalidStartupConfig)?;
+
+    if created && launch_tui_on_first_run && io::stdin().is_terminal() && io::stdout().is_terminal() {
+        let _ = run_operator_tui(
+            OperatorTuiEntry::Setup,
+            OperatorTuiParams {
+                startup: startup.clone(),
+                startup_created: true,
+                audit_limit: TUI_AUDIT_LIMIT,
+            },
+        )
+        .map_err(StartupError::ConfigCommand)?;
+        startup = load_startup_config_from_path(&path).map_err(StartupError::InvalidStartupConfig)?;
+    }
+
+    Ok((startup, created))
 }
 
 fn load_sandbox_config() -> Result<SandboxConfig, StartupError> {
@@ -128,29 +584,7 @@ fn init_tracing() {
     fmt().with_env_filter(filter).compact().init();
 }
 
-fn load_bot_config() -> Result<BotConfig, StartupError> {
-    let emoji_id = read_env_u64("OO_EMOJI_ID", 1489695886773587978)?;
-    let emoji_name = std::env::var("OO_EMOJI_NAME").unwrap_or_else(|_| "Omilfy".to_string());
-    let animated = read_env_bool("OO_EMOJI_ANIMATED", false)?;
-    let stamp_text =
-        std::env::var("OO_STAMP").unwrap_or_else(|_| format!("<:{emoji_name}:{emoji_id}>"));
-
-    let special_phrase =
-        std::env::var("OO_SPECIAL_PHRASE").unwrap_or_else(|_| "これはおお".to_string());
-    let max_count_cap = read_env_usize("OO_MAX_COUNT_CAP", 48)?;
-    let max_send_chars = read_env_usize("OO_MAX_SEND_CHARS", 1_900)?;
-
-    Ok(BotConfig {
-        special_phrase,
-        stamp_text,
-        reaction: ReactionConfig { emoji_id, emoji_name, animated },
-        max_count_cap,
-        max_send_chars,
-    })
-}
-
 fn validate_discord_token(token: &str) -> Result<(), StartupError> {
-    // Token must be present and structurally similar to Discord bot token format.
     if token.trim().is_empty() || !token.contains('.') || token.len() < 50 {
         return Err(StartupError::InvalidEnv("DISCORD_TOKEN"));
     }
@@ -171,127 +605,9 @@ fn read_env_usize(name: &'static str, default: usize) -> Result<usize, StartupEr
     }
 }
 
-fn read_env_bool(name: &'static str, default: bool) -> Result<bool, StartupError> {
-    match std::env::var(name) {
-        Ok(value) => match value.to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => Ok(true),
-            "0" | "false" | "no" | "off" => Ok(false),
-            _ => Err(StartupError::InvalidEnv(name)),
-        },
-        Err(_) => Ok(default),
-    }
-}
-
-fn read_env_f64(name: &'static str, default: f64) -> Result<f64, StartupError> {
-    match std::env::var(name) {
-        Ok(value) => value.parse::<f64>().map_err(|_| StartupError::InvalidEnv(name)),
-        Err(_) => Ok(default),
-    }
-}
-
-fn read_env_id_list(name: &'static str) -> Result<Vec<u64>, StartupError> {
-    let Ok(raw) = std::env::var(name) else {
-        return Ok(vec![]);
-    };
-
-    if raw.trim().is_empty() {
-        return Ok(vec![]);
-    }
-
-    raw.split(',')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .map(|part| part.parse::<u64>().map_err(|_| StartupError::InvalidEnv(name)))
-        .collect()
-}
-
-fn read_env_mode_override(
-    name: &'static str,
-) -> Result<Option<discord_oo_bot::security::mode::RuntimeMode>, StartupError> {
-    use discord_oo_bot::security::mode::RuntimeMode;
-
-    let Ok(raw) = std::env::var(name) else {
-        return Ok(None);
-    };
-
-    let mode = match raw.to_ascii_lowercase().as_str() {
-        "normal" => RuntimeMode::Normal,
-        "observe-only" | "observe_only" => RuntimeMode::ObserveOnly,
-        "react-only" | "react_only" => RuntimeMode::ReactOnly,
-        "audit-only" | "audit_only" => RuntimeMode::AuditOnly,
-        "full-disable" | "full_disable" => RuntimeMode::FullDisable,
-        _ => return Err(StartupError::InvalidEnv(name)),
-    };
-    Ok(Some(mode))
-}
-
 fn read_env_u32(name: &'static str, default: u32) -> Result<u32, StartupError> {
     match std::env::var(name) {
         Ok(value) => value.parse::<u32>().map_err(|_| StartupError::InvalidEnv(name)),
         Err(_) => Ok(default),
-    }
-}
-
-fn read_env_u8(name: &'static str, default: u8) -> Result<u8, StartupError> {
-    match std::env::var(name) {
-        Ok(value) => value.parse::<u8>().map_err(|_| StartupError::InvalidEnv(name)),
-        Err(_) => Ok(default),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::{Mutex, OnceLock};
-
-    use super::{load_session_budget, read_env_u32, read_env_u8, StartupError};
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    #[test]
-    fn rejects_u8_overflow_in_env() {
-        let _guard = match env_lock().lock() {
-            Ok(guard) => guard,
-            Err(err) => panic!("env lock poisoned: {err}"),
-        };
-        let key = "OO_MAX_ACTIONS_PER_MESSAGE_TEST";
-        std::env::set_var(key, "256");
-        let parsed = read_env_u8(key, 1);
-        std::env::remove_var(key);
-
-        assert!(matches!(parsed, Err(StartupError::InvalidEnv("OO_MAX_ACTIONS_PER_MESSAGE_TEST"))));
-    }
-
-    #[test]
-    fn rejects_u32_overflow_in_env() {
-        let _guard = match env_lock().lock() {
-            Ok(guard) => guard,
-            Err(err) => panic!("env lock poisoned: {err}"),
-        };
-        let key = "OO_GLOBAL_RATE_BURST_TEST";
-        std::env::set_var(key, "4294967296");
-        let parsed = read_env_u32(key, 1);
-        std::env::remove_var(key);
-
-        assert!(matches!(parsed, Err(StartupError::InvalidEnv("OO_GLOBAL_RATE_BURST_TEST"))));
-    }
-
-    #[test]
-    fn rejects_budget_remaining_above_total() {
-        let _guard = match env_lock().lock() {
-            Ok(guard) => guard,
-            Err(err) => panic!("env lock poisoned: {err}"),
-        };
-        std::env::set_var("OO_SESSION_BUDGET_TOTAL", "5");
-        std::env::set_var("OO_SESSION_BUDGET_REMAINING", "6");
-
-        let budget = load_session_budget();
-
-        std::env::remove_var("OO_SESSION_BUDGET_TOTAL");
-        std::env::remove_var("OO_SESSION_BUDGET_REMAINING");
-
-        assert!(matches!(budget, Err(StartupError::InvalidEnv("OO_SESSION_BUDGET_REMAINING"))));
     }
 }

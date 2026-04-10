@@ -1,7 +1,6 @@
 use discord_oo_bot::{
     app::analyze_message::{analyze_message, BotConfig},
     domain::{oo_counter::count_oo_sequences, reading_normalizer::normalize_reading},
-    generated::kanji_oo_db::KANJI_OO_DB,
 };
 use proptest::prelude::*;
 
@@ -29,6 +28,6 @@ proptest! {
     #[test]
     fn analyze_message_never_panics_on_random_unicode(s in any::<String>(), is_bot in any::<bool>()) {
         let cfg = BotConfig::default();
-        let _ = analyze_message(&s, is_bot, &cfg, &KANJI_OO_DB);
+        let _ = analyze_message(&s, is_bot, &cfg);
     }
 }

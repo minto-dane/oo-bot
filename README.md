@@ -1,7 +1,7 @@
 # oo-bot
 
 serenity を使った Rust 製 Discord Bot です。  
-メッセージ中の oo 系シーケンスと、「読みのどこかに おお を含む単漢字」をカウントし、リアクションまたはスタンプ送信を行います。
+メッセージ中の oo 系シーケンスと、Lindera 形態素解析で得た読みを使ってヒット数を算出し、リアクションまたはスタンプ送信を行います。
 
 今回の実装では、既存の判定仕様を維持したまま self-protection / runtime protection を追加しています。
 
@@ -28,15 +28,13 @@ serenity を使った Rust 製 Discord Bot です。
 - `OoOO` -> `2`
 - `おおoo大` -> `3` (最後の `大` が辞書判定対象の場合)
 
-### 2) 漢字カウント仕様
+### 2) 形態素読みカウント仕様
 
-- 1文字単位で判定します。
-- 単漢字が持つ読みのうち、正規化後に `おお` を含むものが1つでもあれば、その漢字1文字につき `+1`。
-- 対象読み: `ja_kun`, `nanori`, `ja_on` (デフォルトで有効。生成時フラグで無効化可能)
-- `ja_on` はカタカナをひらがなへ正規化して判定します。
-- 読み記号として `.` `-` `・` などは除去して判定します。
-- Unicode 正規化は NFKC を適用します。
-- 熟語読みは対象外。KANJIDIC2 の単漢字読みのみを対象にします。
+- `morphological_reading` backend のみサポートします。
+- Lindera (`embedded://ipadic`) で token 化し、`details()[7]` / `details()[8]` / surface を正規化して評価します。
+- target readings (`おお`, `オオ`, `oo`) を含む token を hit として数えます。
+- literal sequence (`おお`, `オオ`, `oo`) と重複する token hit は二重加算しません。
+- 漢字語も読みが取得できる場合は hit します (例: `大きい`)。
 
 ### 3) special phrase 優先仕様
 
@@ -119,14 +117,10 @@ serenity を使った Rust 製 Discord Bot です。
 | `AuditOnly` | 全 outbound 抑止 | sandbox trap/timeout 連発 |
 | `FullDisable` | 全 outbound 抑止 | kill switch / invalid token 相当 |
 
-## データソースとライセンス
+## データソース
 
-- 主データ: KANJIDIC2 (`data/vendor/kanjidic2.xml.gz`)
-- 由来: Electronic Dictionary Research and Development Group (EDRDG)
-- ライセンス表記・更新手順: `data/vendor/README.md`
-
-ランタイムでは外部ネットワークを使いません。  
-辞書は `cargo xtask generate` で静的 Rust ソースに変換され、`src/generated/kanji_oo_db.rs` を参照します。
+- 解析辞書は Lindera の埋め込み IPA 辞書 (`embedded://ipadic`) を利用します。
+- ランタイムは外部ネットワークを使いません。
 
 ## セットアップ
 
@@ -145,16 +139,40 @@ Nix は後者向けの任意導入です。Bot の利用者や運用者へ、Nix
 cp env.example .env
 ```
 
-2. 生成ステップ
+2. strict config を配置
 
 ```bash
-cargo xtask generate
+cp config/oo-bot.yaml config/oo-bot.local.yaml
+export OO_CONFIG_PATH=config/oo-bot.local.yaml
 ```
 
 3. Bot 実行
 
 ```bash
-cargo run
+cargo run --bin oo-bot -- run
+```
+
+### audit CLI / TUI
+
+```bash
+cargo run --bin oo-bot -- tui
+cargo run --bin oo-bot -- tui --page setup
+cargo run --bin oo-bot -- audit tail --limit 100
+cargo run --bin oo-bot -- audit stats
+cargo run --bin oo-bot -- audit inspect 42
+cargo run --bin oo-bot -- audit verify
+cargo run --bin oo-bot -- audit export --format jsonl --out /tmp/audit.jsonl
+cargo run --bin oo-bot -- audit tui
+```
+
+### hardening build 検証
+
+```bash
+cargo build --release --bin oo-bot
+./scripts/verify_hardening.sh target/release/oo-bot stable
+
+./scripts/build_hardened_x64.sh
+./scripts/verify_hardening.sh target/x86_64-unknown-linux-gnu/release/oo-bot hardened-x64
 ```
 
 ### 開発・監査ツールを入れたい場合
@@ -182,10 +200,9 @@ cargo run
 nix develop
 ```
 
-2. 生成と軽量確認
+2. 軽量確認
 
 ```bash
-cargo xtask generate
 cargo test --workspace --all-features
 ```
 
@@ -284,10 +301,10 @@ just fuzz-smoke
 	- cargo-geiger
 	- semgrep
 	- feature matrix
-	- 辞書生成 deterministic check
+	- yaml config drift check
 	- docs build
 - `.github/dependabot.yml`
-	- cargo / fuzz / xtask / GitHub Actions の依存更新 PR
+	- cargo / fuzz / GitHub Actions の依存更新 PR
 	- Dependabot alerts / security updates と併用する継続監視導線
 - `.github/workflows/security.yml`
 	- miri (heavy)
@@ -319,34 +336,23 @@ just fuzz-smoke
 
 ## 設定
 
-`env.example` に runtime protection 用設定を追加しています。
+設定は `config/oo-bot.yaml` を source of truth とする strict YAML です。
 
-- mode/kill switch: `OO_MODE_OVERRIDE`, `OO_EMERGENCY_KILL_SWITCH`
-- allow/deny: `OO_ALLOW_*`, `OO_DENY_*`
-- cooldown/bucket: `OO_COOLDOWN_*`, `OO_GLOBAL_RATE_*`
-- suspicious thresholds: `OO_LONG_MESSAGE_*`, `OO_SUSPICIOUS_REPETITION_THRESHOLD`
-- breaker: `OO_BREAKER_*`
-- sandbox budget: `OO_SANDBOX_*`
-- session budget: `OO_SESSION_BUDGET_*`
+- detector / bot / runtime / audit / diagnostics / integrity を YAML で定義します。
+- unknown key は拒否され、起動失敗します。
+- 既定値は `config/oo-bot.yaml` の sample YAML から導出されます。
+- 必要な環境変数は `DISCORD_TOKEN` と `OO_CONFIG_PATH`（任意上書き）です。
+- `OO_PSEUDO_ID_HMAC_KEY` は pseudo-id を有効にする場合のみ必要です。
 
 設定の読み込み規則:
 
-- 不正な数値・真偽値・mode 文字列は `StartupError::InvalidEnv` で起動失敗します
-- comma-separated ID list は空要素を無視し、各要素は `u64` として parse されます
-- `OO_SESSION_BUDGET_REMAINING` は `OO_SESSION_BUDGET_TOTAL` 以下である必要があります
+- 不正な YAML / unknown key / テンプレートプレースホルダ不整合は起動失敗します。
+- detached signature を設定した場合、検証失敗は起動失敗します。
 
 詳細は以下を参照してください。
 
-- `docs/reference/env-reference.md`
 - `docs/reference/config-reference.md`
 - `docs/operations/troubleshooting.md`
-
-## 辞書更新・再生成手順
-
-1. `data/vendor/kanjidic2.xml.gz` を更新
-2. `cargo xtask generate`
-3. `cargo xtask verify`
-4. `cargo test --workspace --all-features`
 
 ## 非目標
 

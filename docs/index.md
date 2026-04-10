@@ -12,7 +12,6 @@
   - [product/behavior-spec.md](product/behavior-spec.md)
   - [product/message-analysis-spec.md](product/message-analysis-spec.md)
   - [product/unicode-normalization-spec.md](product/unicode-normalization-spec.md)
-  - [product/kanji-database-spec.md](product/kanji-database-spec.md)
 - アーキテクチャ
   - [architecture/module-boundaries.md](architecture/module-boundaries.md)
   - [architecture/runtime-protection.md](architecture/runtime-protection.md)
@@ -30,6 +29,7 @@
   - [security/incident-response.md](security/incident-response.md)
 - 運用
   - [operations/deployment.md](operations/deployment.md)
+  - [operations/hardening-and-lsm.md](operations/hardening-and-lsm.md)
   - [operations/runtime-modes.md](operations/runtime-modes.md)
   - [operations/observability.md](operations/observability.md)
   - [operations/troubleshooting.md](operations/troubleshooting.md)
@@ -40,7 +40,6 @@
   - [development/nix-dev-shell.md](development/nix-dev-shell.md)
   - [development/test-strategy.md](development/test-strategy.md)
   - [development/ci-cd.md](development/ci-cd.md)
-  - [development/code-generation.md](development/code-generation.md)
   - [development/fuzzing.md](development/fuzzing.md)
   - [development/contributing.md](development/contributing.md)
 - リファレンス
@@ -53,7 +52,6 @@
   - [reference/docs-conventions.md](reference/docs-conventions.md)
 - ADR
   - [decisions/adr-0001-docs-structure.md](decisions/adr-0001-docs-structure.md)
-  - [decisions/adr-0002-kanjidic2-source-of-truth.md](decisions/adr-0002-kanjidic2-source-of-truth.md)
   - [decisions/adr-0003-runtime-protection-boundary.md](decisions/adr-0003-runtime-protection-boundary.md)
   - [decisions/adr-0004-sandbox-choice.md](decisions/adr-0004-sandbox-choice.md)
 - 付録

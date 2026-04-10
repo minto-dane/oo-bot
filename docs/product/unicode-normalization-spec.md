@@ -6,8 +6,8 @@
 
 ## 適用範囲
 
-- xtask 生成時の読み正規化
 - ランタイムの `reading_normalizer` 実装
+- detector の token reading 正規化
 
 ## 正規化手順
 
@@ -21,11 +21,11 @@
 実装:
 
 - [src/domain/reading_normalizer.rs](../../src/domain/reading_normalizer.rs)
-- [xtask/src/main.rs](../../xtask/src/main.rs)
+- [src/domain/detector.rs](../../src/domain/detector.rs)
 
 ## 仕様上の意図
 
-- KANJIDIC2 読み記法差分を吸収
+- 辞書読み記法差分を吸収
 - 半角カナを同一視
 - 判定を deterministic に維持
 

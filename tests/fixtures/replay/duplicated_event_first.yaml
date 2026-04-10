@@ -5,7 +5,5 @@ author_is_bot: false
 runtime:
   preserve_state: true
 expected:
-  type: react
-  emoji_id: 1489695886773587978
-  emoji_name: Omilfy
-  animated: false
+  type: send_message
+  content: "<:Omilfy:1489695886773587978>"

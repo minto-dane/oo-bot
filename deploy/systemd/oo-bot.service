@@ -1,0 +1,44 @@
+[Unit]
+Description=oo-bot hardened service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oo-bot
+Group=oo-bot
+WorkingDirectory=/opt/oo-bot
+Environment=RUST_LOG=info
+Environment=OO_CONFIG_PATH=/etc/oo-bot/oo-bot.yaml
+EnvironmentFile=-/etc/oo-bot/oo-bot.env
+ExecStart=/opt/oo-bot/oo-bot run
+Restart=on-failure
+RestartSec=2
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+ReadWritePaths=/var/lib/oo-bot
+StateDirectory=oo-bot
+CacheDirectory=oo-bot
+RuntimeDirectory=oo-bot
+
+SystemCallFilter=@system-service
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

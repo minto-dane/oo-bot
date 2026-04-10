@@ -11,5 +11,5 @@
 | runtime mode gate | security/core_governor | runtime_protection_integration | runtime-protection |
 | suppress_reason | security/core_governor + app/replay | replay_suppress_reason_regression | runtime-protection |
 | sandbox limits | sandbox/host | fault_injection + host unit | runtime-protection + security-heavy |
-| deterministic generation | xtask | generated_db + xtask tests | deterministic-db |
+| config bootstrap consistency | config + tests/defaults_canonical | defaults_canonical | canonical-config-and-artifacts |
 | replay format | app/replay | replay_harness | runtime-protection |

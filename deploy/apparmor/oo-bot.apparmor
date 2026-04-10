@@ -1,0 +1,18 @@
+#include <tunables/global>
+
+profile oo-bot /opt/oo-bot/oo-bot {
+  include <abstractions/base>
+
+  network inet stream,
+  network inet6 stream,
+  deny network raw,
+
+  /opt/oo-bot/oo-bot mr,
+  /etc/oo-bot/oo-bot.yaml r,
+  /etc/oo-bot/oo-bot.env r,
+  /var/lib/oo-bot/** rwk,
+  /tmp/** rw,
+
+  deny /proc/** w,
+  deny /sys/** w,
+}

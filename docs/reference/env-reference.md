@@ -2,7 +2,9 @@
 
 ## 目的
 
-運用/開発で使用する環境変数をカテゴリ別に示します。
+運用/開発で使用する環境変数を、現行実装に合わせて整理します。
+
+このプロジェクトは YAML 正本 (`config/oo-bot.yaml`) を基本とし、環境変数は最小限です。
 
 ## 必須
 
@@ -11,33 +13,23 @@
 `DISCORD_TOKEN` は未設定で起動失敗します。
 空文字、`.` を含まない値、極端に短い値も `StartupError::InvalidEnv` になります。
 
-## 推奨（通常運転）
+## 設定ファイル導線
 
-- OO_EMOJI_ID
-- OO_EMOJI_NAME
-- OO_STAMP
-- OO_SPECIAL_PHRASE
-- OO_MAX_COUNT_CAP
-- OO_MAX_SEND_CHARS
-
-## runtime protection
-
-- OO_MODE_OVERRIDE
-- OO_EMERGENCY_KILL_SWITCH
-- OO_ALLOW_GUILD_IDS / OO_DENY_GUILD_IDS
-- OO_ALLOW_CHANNEL_IDS / OO_DENY_CHANNEL_IDS
-- OO_DUPLICATE_TTL_MS / OO_DUPLICATE_CACHE_CAP
-- OO_COOLDOWN_USER_MS / OO_COOLDOWN_CHANNEL_MS / OO_COOLDOWN_GUILD_MS / OO_COOLDOWN_GLOBAL_MS
-- OO_GLOBAL_RATE_PER_SEC / OO_GLOBAL_RATE_BURST
-- OO_MAX_ACTIONS_PER_MESSAGE
-- OO_LONG_MESSAGE_SOFT_CHARS / OO_LONG_MESSAGE_HARD_CHARS / OO_SUSPICIOUS_REPETITION_THRESHOLD
-- OO_BREAKER_WINDOW_MS / OO_BREAKER_THRESHOLD / OO_BREAKER_OPEN_MS
+- OO_CONFIG_PATH
 
 補足:
 
-- `OO_GLOBAL_RATE_BURST` は `u32`
-- `OO_MAX_ACTIONS_PER_MESSAGE` は `u8`
-- 型幅を超える値は黙って切り捨てられず、起動失敗になります
+- 未指定時は `config/oo-bot.yaml` を使います。
+- `OO_CONFIG_PATH` は YAML ファイルの参照先を上書きします。
+
+## 擬似ID HMAC キー
+
+- OO_PSEUDO_ID_HMAC_KEY
+
+補足:
+
+- `integrity.pseudo_id_hmac_key_env` が参照するキーです（既定は上記）。
+- 未設定でも起動できますが、監査の pseudo-id は無効になります。
 
 ## sandbox
 
@@ -45,30 +37,44 @@
 - OO_SANDBOX_TABLE_ELEMENTS
 - OO_SANDBOX_INSTANCE_LIMIT
 - OO_SANDBOX_FUEL_LIMIT
-- OO_SANDBOX_FAILURE_WINDOW_MS
-- OO_SANDBOX_FAILURE_THRESHOLD
+
+補足:
+
+- これらは sandbox 設定の runtime override です。
+- parse 失敗は起動失敗になります。
+- 既定値:
+	- `OO_SANDBOX_MEMORY_BYTES=65536`
+	- `OO_SANDBOX_TABLE_ELEMENTS=64`
+	- `OO_SANDBOX_INSTANCE_LIMIT=4`
+	- `OO_SANDBOX_FUEL_LIMIT=50000`
 
 ## session budget
 
 - OO_SESSION_BUDGET_TOTAL
 - OO_SESSION_BUDGET_REMAINING
 - OO_SESSION_BUDGET_RESET_AFTER
-- OO_SESSION_BUDGET_LOW_WATERMARK
 
 補足:
 
-- `OO_SESSION_BUDGET_TOTAL` / `REMAINING` / `LOW_WATERMARK` は `u32`
+- `OO_SESSION_BUDGET_TOTAL` / `OO_SESSION_BUDGET_REMAINING` は `u32`
 - `OO_SESSION_BUDGET_REMAINING > OO_SESSION_BUDGET_TOTAL` は不正として起動失敗します
-- low watermark 以下で起動した場合、最初の message decision で `ReactOnly` へ遷移しやすくなります
+- 既定値:
+	- `OO_SESSION_BUDGET_TOTAL=1000`
+	- `OO_SESSION_BUDGET_RESET_AFTER=86400`
+	- `OO_SESSION_BUDGET_REMAINING` 未指定時は `OO_SESSION_BUDGET_TOTAL` と同値
+
+## 旧環境変数について
+
+`OO_MODE_OVERRIDE` などの多数の旧 `OO_*` は現行では参照されません。
+runtime policy や detector/bot 設定は YAML (`config/oo-bot.yaml`) 側で管理します。
 
 ## 例
 
 ```bash
 export DISCORD_TOKEN=xxxxx.yyyyy.zzzzz
-export OO_MODE_OVERRIDE=
-export OO_EMERGENCY_KILL_SWITCH=false
-export OO_GLOBAL_RATE_BURST=30
-export OO_MAX_ACTIONS_PER_MESSAGE=1
+export OO_CONFIG_PATH=config/oo-bot.yaml
+export OO_PSEUDO_ID_HMAC_KEY=CHANGE_ME_TO_RANDOM_32B
+export OO_SANDBOX_FUEL_LIMIT=50000
 export OO_SESSION_BUDGET_TOTAL=1000
 export OO_SESSION_BUDGET_REMAINING=1000
 ```

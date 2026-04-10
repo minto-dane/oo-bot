@@ -7,7 +7,6 @@ use discord_oo_bot::{
         analyze_message::BotConfig,
         replay::{build_replay_core, load_replay_cases, run_replay_case_with_core},
     },
-    generated::kanji_oo_db::KANJI_OO_DB,
 };
 
 fn main() -> ExitCode {
@@ -17,7 +16,7 @@ fn main() -> ExitCode {
         .unwrap_or_else(|| PathBuf::from("tests/fixtures/replay"));
 
     let config = BotConfig::default();
-    let mut core = match build_replay_core(config.clone(), &KANJI_OO_DB) {
+    let mut core = match build_replay_core(config.clone()) {
         Ok(core) => core,
         Err(err) => {
             eprintln!("failed to initialize sandbox: {err}");
@@ -41,7 +40,7 @@ fn main() -> ExitCode {
     let mut failures = 0usize;
     for case in &cases {
         if !case.runtime.preserve_state {
-            core = match build_replay_core(config.clone(), &KANJI_OO_DB) {
+            core = match build_replay_core(config.clone()) {
                 Ok(core) => core,
                 Err(err) => {
                     eprintln!("failed to initialize sandbox: {err}");

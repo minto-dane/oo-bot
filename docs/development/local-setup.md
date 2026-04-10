@@ -17,9 +17,11 @@
 git clone <repo>
 cd oo-bot
 cp env.example .env
+cargo run --bin oo-bot -- config init
 ```
 
 `.env` には最低限 `DISCORD_TOKEN` を設定します。
+初期値を調整したい場合は `cargo run --bin oo-bot -- config setup` または `cargo run --bin oo-bot -- tui --page setup` を使います。
 
 ## 推奨ツール導入
 
@@ -54,4 +56,4 @@ cargo test --workspace --all-features
 
 - tool 未導入: `cargo-nextest` など不足
 - env 不正: bool/list/mode の形式違反
-- generated DB 差分: `cargo xtask generate` 未実行
+- config bootstrap/render 差分: `cargo test --test defaults_canonical --all-features` 未実行

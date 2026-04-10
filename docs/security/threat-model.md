@@ -9,7 +9,7 @@
 - Discord bot token
 - outbound action capability
 - runtime mode/state
-- generated kanji DB integrity
+- yaml config integrity
 - audit/log evidence
 
 ## 攻撃者像
@@ -25,12 +25,12 @@
 - REST 失敗連発を誘発する入力パターン
 - replayed/duplicated events
 - 極端長文/Unicode 異常入力
-- 生成データ改ざん
+- 設定改ざん
 
 ## 信頼境界
 
 - trusted: core + serenity client + token
-- semi-trusted: generated DB, runtime config
+- semi-trusted: runtime config
 - untrusted: message content, sandbox result, external API status
 
 ## 主要脅威と対策
@@ -42,7 +42,8 @@
 | analyzer 暴走 | Wasmtime fuel + store limits + fail-safe Noop |
 | invalid request surge | breaker + observe_only 遷移 |
 | 誤送信 | allow/deny と mode gate |
-| 生成物ドリフト | deterministic-db CI check |
+| 設定改ざん | アクセス制御（最小権限、RBAC）+ 変更監査ログ（変更履歴の記録・アラート）+ 署名検証またはハッシュによる設定整合性チェック + 変更承認ワークフロー |
+| yaml 設定ドリフト | canonical-config-and-artifacts CI check |
 
 ## 参照
 

@@ -4,22 +4,28 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use crate::{
     app::analyze_message::{BotAction, BotConfig},
-    domain::kanji_matcher::{count_oo_kanji, KanjiOoDb},
+    domain::detector::{
+        DetectionReport, DetectorBackendKind, DetectorPolicy, MessageDetector,
+        MorphologicalReadingDetector,
+    },
     sandbox::abi::{ActionProposal, AnalyzerError, AnalyzerRequest, ProposalAnalyzer},
     security::{
         circuit_breaker::HttpCircuitBreaker,
         duplicate_guard::DuplicateGuard,
         mode::{ModeState, ModeTrigger, RuntimeMode},
         rate_limiter::TokenBucket,
+        response_compiler::compile_response_from_detection,
         session_budget::SessionBudget,
         suspicious_input::{classify_suspicious_input, SuspicionLevel, SuspiciousInputConfig},
     },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct RuntimeProtectionConfig {
     pub duplicate_ttl_ms: u64,
     pub duplicate_cache_cap: usize,
@@ -50,33 +56,7 @@ pub struct RuntimeProtectionConfig {
 
 impl Default for RuntimeProtectionConfig {
     fn default() -> Self {
-        Self {
-            duplicate_ttl_ms: 180_000,
-            duplicate_cache_cap: 8192,
-            per_user_cooldown_ms: 900,
-            per_channel_cooldown_ms: 400,
-            per_guild_cooldown_ms: 250,
-            global_cooldown_ms: 100,
-            global_rate_per_sec: 20.0,
-            global_rate_burst: 30,
-            max_actions_per_message: 1,
-            max_send_chars: 1_900,
-            long_message_soft_chars: 2_000,
-            long_message_hard_chars: 8_000,
-            suspicious_repetition_threshold: 256,
-            breaker_window_ms: 60_000,
-            breaker_threshold: 64,
-            breaker_open_ms: 120_000,
-            sandbox_failure_window_ms: 30_000,
-            sandbox_failure_threshold: 10,
-            allow_guild_ids: vec![],
-            deny_guild_ids: vec![],
-            allow_channel_ids: vec![],
-            deny_channel_ids: vec![],
-            mode_override: None,
-            emergency_kill_switch: false,
-            session_budget_low_watermark: 5,
-        }
+        crate::config::default_runtime_protection_config()
     }
 }
 
@@ -131,9 +111,9 @@ pub struct RuntimeMetrics {
 
 pub struct TrustedCore {
     analyzer: Box<dyn ProposalAnalyzer + Send>,
+    detector: Box<dyn MessageDetector + Send + Sync>,
     bot_config: BotConfig,
     runtime: RuntimeProtectionConfig,
-    db: &'static KanjiOoDb,
     mode: ModeState,
     duplicate_guard: DuplicateGuard,
     breaker: HttpCircuitBreaker,
@@ -145,6 +125,7 @@ pub struct TrustedCore {
     suspicious_cfg: SuspiciousInputConfig,
     session_budget: SessionBudget,
     sandbox_failures: VecDeque<Instant>,
+    last_detection: Option<DetectionReport>,
     metrics: RuntimeMetrics,
 }
 
@@ -153,19 +134,28 @@ impl TrustedCore {
         analyzer: Box<dyn ProposalAnalyzer + Send>,
         bot_config: BotConfig,
         runtime: RuntimeProtectionConfig,
-        db: &'static KanjiOoDb,
+    ) -> Self {
+        let detector = default_detector();
+        Self::new_with_detector(analyzer, detector, bot_config, runtime)
+    }
+
+    pub fn new_with_detector(
+        analyzer: Box<dyn ProposalAnalyzer + Send>,
+        detector: Box<dyn MessageDetector + Send + Sync>,
+        bot_config: BotConfig,
+        runtime: RuntimeProtectionConfig,
     ) -> Self {
         let now = Instant::now();
 
         Self {
             analyzer,
+            detector,
             bot_config,
             suspicious_cfg: SuspiciousInputConfig {
                 soft_char_limit: runtime.long_message_soft_chars,
                 hard_char_limit: runtime.long_message_hard_chars,
                 repetition_threshold: runtime.suspicious_repetition_threshold,
             },
-            db,
             mode: ModeState::new(now),
             duplicate_guard: DuplicateGuard::new(
                 Duration::from_millis(runtime.duplicate_ttl_ms),
@@ -194,6 +184,7 @@ impl TrustedCore {
                 runtime.session_budget_low_watermark,
             ),
             sandbox_failures: VecDeque::new(),
+            last_detection: None,
             metrics: RuntimeMetrics::default(),
             runtime,
         }
@@ -205,6 +196,10 @@ impl TrustedCore {
 
     pub fn metrics(&self) -> RuntimeMetrics {
         self.metrics.clone()
+    }
+
+    pub fn last_detection(&self) -> Option<DetectionReport> {
+        self.last_detection.clone()
     }
 
     pub fn set_mode_override(&mut self, mode: Option<RuntimeMode>) {
@@ -328,6 +323,8 @@ impl TrustedCore {
         }
 
         let suspicion = classify_suspicious_input(content, &self.suspicious_cfg);
+        let detection = self.detector.detect(content);
+        self.last_detection = Some(detection.clone());
 
         let proposal = if suspicion == SuspicionLevel::Hard {
             ActionProposal::SuspiciousInput
@@ -335,8 +332,8 @@ impl TrustedCore {
             self.metrics.analyzer_calls_total = self.metrics.analyzer_calls_total.saturating_add(1);
             let req = AnalyzerRequest {
                 content,
-                kanji_count: count_oo_kanji(content, self.db),
-                special_phrase_hit: content.contains(&self.bot_config.special_phrase),
+                kanji_count: detection.backend_count_for_sandbox(),
+                special_phrase_hit: detection.special_phrase_hit,
             };
             match self.analyzer.propose(&req) {
                 Ok(p) => p,
@@ -347,7 +344,7 @@ impl TrustedCore {
             }
         };
 
-        self.finalize(ctx, proposal, suspicion, mode, now)
+        self.finalize(ctx, proposal, suspicion, mode, now, Some(&detection))
     }
 
     fn finalize(
@@ -357,23 +354,27 @@ impl TrustedCore {
         suspicion: SuspicionLevel,
         mode: RuntimeMode,
         now: Instant,
+        detection: Option<&DetectionReport>,
     ) -> ActionDecision {
-        let mut proposed_action = proposal_to_action(&proposal, &self.bot_config);
-
-        if suspicion == SuspicionLevel::Soft
-            && matches!(proposed_action, BotAction::SendMessage { .. })
-        {
-            proposed_action = as_react(&self.bot_config);
-        }
-
-        let mut action = apply_mode_gate(mode, proposed_action.clone(), &self.bot_config);
+        let mut action = compile_response_from_detection(
+            &proposal,
+            mode,
+            suspicion,
+            &self.bot_config,
+            self.runtime.max_send_chars,
+            self.bot_config.max_count_cap,
+            detection,
+        );
 
         if matches!(action, BotAction::Noop) {
-            if !matches!(proposed_action, BotAction::Noop) {
+            if mode != RuntimeMode::Normal && is_outbound_proposal(&proposal) {
                 return self.drop(mode, proposal, suspicion, SuppressReason::ModeRestricted);
             }
             if matches!(proposal, ActionProposal::SuspiciousInput) {
                 return self.drop(mode, proposal, suspicion, SuppressReason::Suspicious);
+            }
+            if is_outbound_proposal(&proposal) {
+                return self.drop(mode, proposal, suspicion, SuppressReason::InvalidAction);
             }
             return ActionDecision { action, mode, proposal, suspicion, suppress_reason: None };
         }
@@ -524,6 +525,44 @@ impl TrustedCore {
     }
 }
 
+fn default_detector() -> Box<dyn MessageDetector + Send + Sync> {
+    match MorphologicalReadingDetector::new(DetectorPolicy::default()) {
+        Ok(detector) => Box::new(detector),
+        Err(err) => {
+            warn!(error = %err, "morphological detector init failed; falling back to no-hit detector");
+            Box::new(NoHitDetector)
+        }
+    }
+}
+
+struct NoHitDetector;
+
+impl MessageDetector for NoHitDetector {
+    fn backend_kind(&self) -> DetectorBackendKind {
+        DetectorBackendKind::Fallback
+    }
+
+    fn detect(&self, _content: &str) -> DetectionReport {
+        DetectionReport {
+            backend: DetectorBackendKind::Fallback,
+            matched_backend: "fallback",
+            matched_readings: Vec::new(),
+            sequence_hits: 0,
+            kanji_hits: 0,
+            total_count: 0,
+            special_phrase_hit: false,
+            token_count: 0,
+        }
+    }
+}
+
+fn is_outbound_proposal(proposal: &ActionProposal) -> bool {
+    matches!(
+        proposal,
+        ActionProposal::SpecialPhrase | ActionProposal::ReactOnce | ActionProposal::SendStamped { .. }
+    )
+}
+
 #[derive(Debug, Clone)]
 struct CooldownMap {
     ttl: Duration,
@@ -541,56 +580,6 @@ impl CooldownMap {
 
     fn mark(&mut self, key: u64, now: Instant) {
         self.next_allowed.insert(key, now + self.ttl);
-    }
-}
-
-fn proposal_to_action(proposal: &ActionProposal, bot: &BotConfig) -> BotAction {
-    match proposal {
-        ActionProposal::Noop | ActionProposal::Defer | ActionProposal::Reject { .. } => {
-            BotAction::Noop
-        }
-        ActionProposal::SuspiciousInput => BotAction::Noop,
-        ActionProposal::SpecialPhrase => BotAction::SendMessage { content: bot.stamp_text.clone() },
-        ActionProposal::ReactOnce => as_react(bot),
-        ActionProposal::SendStamped { count } => {
-            if *count <= 1 {
-                as_react(bot)
-            } else {
-                BotAction::SendMessage { content: repeat_stamp(&bot.stamp_text, *count as usize) }
-            }
-        }
-    }
-}
-
-fn as_react(bot: &BotConfig) -> BotAction {
-    BotAction::React {
-        emoji_id: bot.reaction.emoji_id,
-        emoji_name: bot.reaction.emoji_name.clone(),
-        animated: bot.reaction.animated,
-    }
-}
-
-fn repeat_stamp(stamp: &str, n: usize) -> String {
-    let mut out = String::with_capacity(stamp.len().saturating_mul(n).saturating_add(n));
-    for idx in 0..n {
-        if idx > 0 {
-            out.push(' ');
-        }
-        out.push_str(stamp);
-    }
-    out
-}
-
-fn apply_mode_gate(mode: RuntimeMode, action: BotAction, bot: &BotConfig) -> BotAction {
-    match mode {
-        RuntimeMode::Normal => action,
-        RuntimeMode::ObserveOnly | RuntimeMode::AuditOnly | RuntimeMode::FullDisable => {
-            BotAction::Noop
-        }
-        RuntimeMode::ReactOnly => match action {
-            BotAction::SendMessage { .. } => as_react(bot),
-            other => other,
-        },
     }
 }
 
@@ -627,7 +616,6 @@ fn is_invalid_action(action: &BotAction) -> bool {
 mod tests {
     use crate::{
         app::analyze_message::{BotAction, BotConfig},
-        domain::kanji_matcher::{KanjiOoDb, KanjiOoDbMetadata},
         sandbox::abi::{
             ActionProposal, AnalyzerError, AnalyzerRequest, ProposalAnalyzer, SANDBOX_ABI_VERSION,
         },
@@ -635,18 +623,6 @@ mod tests {
     };
 
     use super::{MessageContext, RuntimeProtectionConfig, TrustedCore};
-
-    const TEST_DB: KanjiOoDb = KanjiOoDb::new(
-        &['大' as u32],
-        KanjiOoDbMetadata {
-            source_name: "test",
-            source_sha256: "test",
-            total_chars: 1,
-            ja_kun_hits: 1,
-            nanori_hits: 0,
-            ja_on_hits: 0,
-        },
-    );
 
     struct FixedAnalyzer {
         proposal: ActionProposal,
@@ -669,7 +645,6 @@ mod tests {
             Box::new(FixedAnalyzer { proposal: ActionProposal::ReactOnce }),
             BotConfig::default(),
             cfg,
-            &TEST_DB,
         );
 
         let ctx = MessageContext {
@@ -698,7 +673,6 @@ mod tests {
             Box::new(FixedAnalyzer { proposal: ActionProposal::SendStamped { count: 3 } }),
             BotConfig::default(),
             cfg,
-            &TEST_DB,
         );
 
         let ctx = MessageContext {

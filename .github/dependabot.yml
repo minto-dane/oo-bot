@@ -21,26 +21,6 @@ updates:
           - "patch"
 
   - package-ecosystem: "cargo"
-    directory: "/xtask"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "03:10"
-      timezone: "America/New_York"
-    open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "rust"
-      - "security"
-    commit-message:
-      prefix: "deps"
-    groups:
-      cargo-minor-and-patch:
-        update-types:
-          - "minor"
-          - "patch"
-
-  - package-ecosystem: "cargo"
     directory: "/fuzz"
     schedule:
       interval: "weekly"

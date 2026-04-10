@@ -6,9 +6,11 @@
 
 ## 読み込み責務
 
-- main が環境変数を読み込み、型変換・妥当性検証を実施
+- main が `oo-bot.yaml` を読み込み、型変換・妥当性検証を実施
+- `OO_CONFIG_PATH` を指定した場合はその YAML を使う
+- config 不在時は sample YAML から初期ファイルを生成する
 - invalid 値は `StartupError::InvalidEnv` で起動失敗
-- 未設定値はコードデフォルトを適用
+- 未指定キーの default は埋め込み sample YAML 由来で補完する
 
 実装: [src/main.rs](../../src/main.rs)
 
@@ -32,7 +34,7 @@
 ## 安全側フォールバック
 
 - パース不能値: 起動停止
-- 未設定値: デフォルト採用
+- 未設定値: YAML default を採用
 - emergency kill switch: 強制 full disable
 
 詳細キー一覧は [reference/config-reference.md](../reference/config-reference.md) を参照。

@@ -9,7 +9,7 @@
 - ひらがな `おお`
 - カタカナ `オオ`
 - ASCII `oo`, `oO`, `Oo`, `OO`
-- 単漢字（generated DB に存在する文字）
+- Lindera 形態素解析で読みが target readings を含む token
 
 ## non-overlapping 条件
 
@@ -29,11 +29,12 @@
 
 実装: [src/app/analyze_message.rs](../../src/app/analyze_message.rs)
 
-## 漢字カウント
+## 形態素読みカウント
 
-`count_oo_kanji` は message の各 `char` が DB に含まれるかを二分探索で判定します。
+`morphological_reading` backend が Lindera (`embedded://ipadic`) を使って token 化し、
+`details()[7]` / `details()[8]` / surface を正規化して hit 判定します。
 
-実装: [src/domain/kanji_matcher.rs](../../src/domain/kanji_matcher.rs)
+実装: [src/domain/detector.rs](../../src/domain/detector.rs)
 
 ## sandbox analyzer の役割
 

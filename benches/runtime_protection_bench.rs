@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use discord_oo_bot::{
     app::analyze_message::{analyze_message, BotConfig},
-    generated::kanji_oo_db::KANJI_OO_DB,
     sandbox::host::{SandboxConfig, WasmtimeSandboxAnalyzer},
     security::{
         core_governor::{MessageContext, RuntimeProtectionConfig, TrustedCore},
@@ -20,7 +19,7 @@ fn bench_runtime(c: &mut Criterion) {
 
     group.bench_with_input(BenchmarkId::new("pure_analyze", "mixed"), &content, |b, input| {
         b.iter(|| {
-            let _ = analyze_message(input, false, &cfg, &KANJI_OO_DB);
+            let _ = analyze_message(input, false, &cfg);
         });
     });
 
@@ -33,7 +32,7 @@ fn bench_runtime(c: &mut Criterion) {
         global_cooldown_ms: 0,
         ..RuntimeProtectionConfig::default()
     };
-    let mut core = TrustedCore::new(Box::new(analyzer), cfg.clone(), runtime_cfg, &KANJI_OO_DB);
+    let mut core = TrustedCore::new(Box::new(analyzer), cfg.clone(), runtime_cfg);
 
     let mut message_id = 0u64;
     group.bench_with_input(BenchmarkId::new("sandbox_governor", "mixed"), &content, |b, input| {

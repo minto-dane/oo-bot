@@ -5,7 +5,7 @@ use unicode_normalization::UnicodeNormalization;
 /// Applied rules:
 /// - NFKC normalization
 /// - trim both ends
-/// - strip separators and punctuation used by KANJIDIC2 reading notation
+/// - strip separators and punctuation used in dictionary reading notation
 /// - convert katakana to hiragana
 pub fn normalize_reading(input: &str) -> String {
     let normalized = input.nfkc().collect::<String>();

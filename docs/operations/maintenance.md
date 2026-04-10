@@ -13,12 +13,11 @@
   - `just ci-local`
   - replay/fault-inject 実行
 
-## 生成データ保守
+## 設定保守
 
-1. 辞書更新
-2. `cargo xtask generate`
-3. `cargo xtask verify`
-4. メタデータ差分レビュー
+1. `config/oo-bot.yaml` の変更を確認
+2. `cargo test --test defaults_canonical --all-features`
+3. replay / runtime integration の結果を確認
 
 ## テスト資産保守
 

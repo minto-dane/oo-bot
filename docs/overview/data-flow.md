@@ -13,13 +13,12 @@ sequenceDiagram
   participant H as Handler
   participant C as TrustedCore
   participant S as Sandbox Analyzer
-  participant D as Generated Kanji DB
   participant R as Discord REST
 
   U->>H: message create
   H->>C: decide_message(MessageContext, content)
   C->>C: duplicate/cooldown/allowlist checks
-  C->>D: count_oo_kanji
+  C->>C: Lindera morphological detection
   C->>S: propose(AnalyzerRequest)
   S-->>C: ActionProposal
   C->>C: mode gate + limiter + caps

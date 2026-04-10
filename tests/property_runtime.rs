@@ -1,6 +1,5 @@
 use discord_oo_bot::{
     app::analyze_message::{BotAction, BotConfig},
-    generated::kanji_oo_db::KANJI_OO_DB,
     sandbox::host::{SandboxConfig, WasmtimeSandboxAnalyzer},
     security::core_governor::{MessageContext, RuntimeProtectionConfig, TrustedCore},
 };
@@ -17,7 +16,7 @@ fn build_core(max_send: usize) -> TrustedCore {
         max_send_chars: max_send,
         ..RuntimeProtectionConfig::default()
     };
-    TrustedCore::new(Box::new(analyzer), BotConfig::default(), cfg, &KANJI_OO_DB)
+    TrustedCore::new(Box::new(analyzer), BotConfig::default(), cfg)
 }
 
 proptest! {

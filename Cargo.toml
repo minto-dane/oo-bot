@@ -2,9 +2,10 @@
 name = "discord-oo-bot"
 version = "0.1.0"
 edition = "2021"
+default-run = "oo-bot"
 
 [workspace]
-members = ["xtask", "fuzz"]
+members = ["fuzz"]
 
 [features]
 default = ["ja_on"]
@@ -23,10 +24,30 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 unicode-normalization = "0.1"
 wasmtime = "43.0.0"
 wat = "1.246.2"
+clap = { version = "4.5", features = ["derive"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+csv = "1.4"
+lindera = { version = "3.0.5", features = ["embed-ipadic"] }
+parquet = { version = "53", default-features = false, features = ["arrow"] }
+arrow-array = "53"
+arrow-schema = "53"
+ratatui = "0.30"
+crossterm = "0.29"
+time = { version = "0.3", features = ["formatting"] }
+tempfile = "3.14"
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["html_reports", "cargo_bench_support"] }
 proptest = "1.6"
+
+[profile.release]
+overflow-checks = true
+panic = "abort"
+lto = "thin"
+codegen-units = 1
 
 [[bench]]
 name = "oo_count_bench"
@@ -35,3 +56,11 @@ harness = false
 [[bench]]
 name = "runtime_protection_bench"
 harness = false
+
+[[bin]]
+name = "oo-bot"
+path = "src/main.rs"
+
+[[bin]]
+name = "replay"
+path = "src/bin/replay.rs"

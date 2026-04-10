@@ -1,0 +1,24 @@
+┌Status────────────────────────────────────────────────────────────────────────────────────────────┐
+│oo-bot operator tui   active=apparmor,yama   config=config/oo-bot.yaml                            │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌Dashboard───────────────────────┐┌Health─────────────────────────┐┌Runtime Env────────────────────┐
+│config schema: oo-bot.strict-v1 ││local self-check: pass         ││writable paths:                │
+│audit schema: 1                 ││audit db health: verified 10   ││config: config                 │
+│config fingerprint:             ││recent rows                    ││audit: state/audit             │
+│0123456789abcdef0123456789abcdef││integrity verify: unsigned     ││                               │
+│0123456789abcdef0123456789abcdef││config                         ││recommendations:               │
+│detector backend:               ││dependency snapshot: present   ││- prefer AppArmor              │
+│MorphologicalReading            ││export-safe policy: export     ││- keep state persistent        │
+│active LSM: apparmor,yama       ││cap=50000 query cap=10000      ││                               │
+│confinement: AppArmor profile   ││pseudo-id=disabled             ││                               │
+│docker-default                  ││startup config:                ││                               │
+│hardening:                      ││config/oo-bot.yaml             ││                               │
+│target=x86_64-linux,stable_relea││                               ││                               │
+│se_profile=true,hardened_x64_req││                               ││                               │
+│uested=true,cet_requested=true,s││                               ││                               │
+│sp_requested=true,cfi_requested=││                               ││                               │
+│true                            ││                               ││                               │
+└────────────────────────────────┘└───────────────────────────────┘└───────────────────────────────┘
+┌Help──────────────────────────────────────────────────────────────────────────────────────────────┐
+│snapshot                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘

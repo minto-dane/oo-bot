@@ -20,6 +20,23 @@ Nix は後者向けの任意手段です。Bot を動かすだけなら必須で
 - replay
   - `cargo run --bin replay -- tests/fixtures/replay`
   - replay CLI は state reset / `preserve_state` / sandbox trap/timeout injection を含めて test harness と同じ挙動を取る
+- bot run
+  - `cargo run --bin oo-bot -- run`
+- dashboard / operator tui
+  - `cargo run --bin oo-bot -- tui`
+  - `cargo run --bin oo-bot -- tui --page setup|dashboard|diagnostics|audit`
+- config
+  - `cargo run --bin oo-bot -- config init`
+  - `cargo run --bin oo-bot -- config init --force`
+  - `cargo run --bin oo-bot -- config setup`
+  - `cargo run --bin oo-bot -- config edit`
+- audit
+  - `cargo run --bin oo-bot -- audit tail --limit 100`
+  - `cargo run --bin oo-bot -- audit stats`
+  - `cargo run --bin oo-bot -- audit inspect <event_id>`
+  - `cargo run --bin oo-bot -- audit verify`
+  - `cargo run --bin oo-bot -- audit export --format jsonl|csv|parquet --out <path>`
+  - `cargo run --bin oo-bot -- audit tui`
 - clippy
   - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 
@@ -32,12 +49,11 @@ Nix は後者向けの任意手段です。Bot を動かすだけなら必須で
 3. runtime guardrail を追加確認したい:
    - `cargo test --test runtime_protection_integration --test fault_injection --all-features`
 4. 起動設定の unit test を見たい:
-   - `cargo test --bin discord-oo-bot --all-features`
-
-## xtask
-
-- `cargo xtask generate`
-- `cargo xtask verify`
+  - `cargo test --bin oo-bot --all-features`
+5. 初期設定を作る / 変更したい:
+  - `cargo run --bin oo-bot -- config init`
+  - `cargo run --bin oo-bot -- config setup`
+  - `cargo run --bin oo-bot -- tui --page setup`
 
 ## just
 
@@ -46,6 +62,8 @@ Nix は後者向けの任意手段です。Bot を動かすだけなら必須で
 - `just fault-inject`
 - `just fuzz-smoke`
 - `just bench-sanity`
+- `just hardened-x64`
+- `just verify-hardening`
 
 ## CI heavy tooling
 
@@ -59,8 +77,7 @@ Nix は後者向けの任意手段です。Bot を動かすだけなら必須で
 ## ツール導入の考え方
 
 - 運用者
-  - `cargo xtask generate`
-  - `cargo run`
+  - `cargo run --bin oo-bot -- run`
 - 開発者 / CI
   - Nix を使う場合は `nix develop`
   - 非 Nix 環境では `./scripts/bootstrap_security_tools.sh`
