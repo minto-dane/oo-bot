@@ -5,14 +5,16 @@ use std::time::SystemTime;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 
 use crate::audit::{
-    AuditQueryFilter, AuditStats, AuditStore, AuditStoreConfig, AuditEventRow, SCHEMA_VERSION,
+    AuditEventRow, AuditQueryFilter, AuditStats, AuditStore, AuditStoreConfig, SCHEMA_VERSION,
 };
 use crate::config::{
     canonical_startup_config, validate_startup_config, write_startup_config_to_path,
@@ -188,22 +190,28 @@ const DIAGNOSTIC_FIELDS: &[SetupField] = &[
     SetupField::DependencySecurityCheckMode,
 ];
 
-const INTEGRITY_FIELDS: &[SetupField] = &[
-    SetupField::SignatureEnabled,
-    SetupField::SignaturePath,
-    SetupField::SignatureHmacEnv,
-];
+const INTEGRITY_FIELDS: &[SetupField] =
+    &[SetupField::SignatureEnabled, SetupField::SignaturePath, SetupField::SignatureHmacEnv];
 
-pub fn run_operator_tui(entry: OperatorTuiEntry, params: OperatorTuiParams) -> Result<OperatorTuiResult, String> {
+pub fn run_operator_tui(
+    entry: OperatorTuiEntry,
+    params: OperatorTuiParams,
+) -> Result<OperatorTuiResult, String> {
     let lsm_status = detect_lsm_status();
     let hardening_status = detect_hardening_status();
     let local_self_check = run_local_self_check(&params.startup);
-    let diagnostics = build_diagnostics_summary(&params.startup, &local_self_check, &lsm_status, &hardening_status);
+    let diagnostics = build_diagnostics_summary(
+        &params.startup,
+        &local_self_check,
+        &lsm_status,
+        &hardening_status,
+    );
     let audit = load_audit_state(&params.startup, params.audit_limit);
 
     let mut app = OperatorTuiApp {
         status: if params.startup_created {
-            "new config created from yaml defaults. open setup to review before first run".to_string()
+            "new config created from yaml defaults. open setup to review before first run"
+                .to_string()
         } else {
             "1:dashboard 2:setup 3:diagnostics 4:audit   q:quit".to_string()
         },
@@ -238,9 +246,7 @@ pub fn run_operator_tui(entry: OperatorTuiEntry, params: OperatorTuiParams) -> R
 
     let loop_result = (|| -> Result<OperatorTuiResult, String> {
         loop {
-            terminal
-                .draw(|frame| render_app(frame, &app))
-                .map_err(|err| err.to_string())?;
+            terminal.draw(|frame| render_app(frame, &app)).map_err(|err| err.to_string())?;
 
             if !event::poll(std::time::Duration::from_millis(200)).map_err(|err| err.to_string())? {
                 continue;
@@ -318,11 +324,13 @@ fn render_app(frame: &mut Frame<'_>, app: &OperatorTuiApp) {
                 setup_field_label(field)
             )
         }
-        InputMode::AuditSearch => "audit search: type to filter, enter=apply, esc=cancel".to_string(),
+        InputMode::AuditSearch => {
+            "audit search: type to filter, enter=apply, esc=cancel".to_string()
+        }
     };
     let footer = Paragraph::new(footer_text)
-    .block(Block::default().title("Help").borders(Borders::ALL))
-    .wrap(Wrap { trim: true });
+        .block(Block::default().title("Help").borders(Borders::ALL))
+        .wrap(Wrap { trim: true });
     frame.render_widget(footer, layout[2]);
 }
 
@@ -335,7 +343,11 @@ fn render_dashboard(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Op
     } else {
         Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(34), Constraint::Percentage(33), Constraint::Percentage(33)])
+            .constraints([
+                Constraint::Percentage(34),
+                Constraint::Percentage(33),
+                Constraint::Percentage(33),
+            ])
             .split(area)
     };
 
@@ -449,7 +461,9 @@ fn render_diagnostics(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &
         .local_self_check
         .items
         .iter()
-        .map(|item| format!("[{}] {}: {}", format_check_status(&item.status), item.name, item.detail))
+        .map(|item| {
+            format!("[{}] {}: {}", format_check_status(&item.status), item.name, item.detail)
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let details = Paragraph::new(items)
@@ -505,9 +519,13 @@ fn render_audit(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Operat
         .collect::<Vec<_>>()
         .join("\n");
 
-    let rows = Paragraph::new(if lines.is_empty() { "no rows match the current filter".to_string() } else { lines })
-        .block(Block::default().title("Audit Rows").borders(Borders::ALL))
-        .wrap(Wrap { trim: true });
+    let rows = Paragraph::new(if lines.is_empty() {
+        "no rows match the current filter".to_string()
+    } else {
+        lines
+    })
+    .block(Block::default().title("Audit Rows").borders(Borders::ALL))
+    .wrap(Wrap { trim: true });
     frame.render_widget(rows, chunks[2]);
 }
 
@@ -543,10 +561,8 @@ fn handle_setup_normal_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<(
         KeyCode::Char('p') => {
             app.setup.page = SetupPage::Preview;
         }
-        KeyCode::Up => {
-            if app.setup.selected > 0 {
-                app.setup.selected -= 1;
-            }
+        KeyCode::Up if app.setup.selected > 0 => {
+            app.setup.selected -= 1;
         }
         KeyCode::Down => {
             let len = setup_fields_for_page(app.setup.page).len();
@@ -578,8 +594,9 @@ fn handle_setup_normal_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<(
                 validate_startup_config(&app.setup.draft).map_err(|err| err.to_string())?;
                 write_startup_config_to_path(&app.startup.config_path, &app.setup.draft)
                     .map_err(|err| err.to_string())?;
-                app.startup = crate::config::load_startup_config_from_path(&app.startup.config_path)
-                    .map_err(|err| err.to_string())?;
+                app.startup =
+                    crate::config::load_startup_config_from_path(&app.startup.config_path)
+                        .map_err(|err| err.to_string())?;
                 let local_self_check = run_local_self_check(&app.startup);
                 app.diagnostics = build_diagnostics_summary(
                     &app.startup,
@@ -598,7 +615,11 @@ fn handle_setup_normal_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<(
     Ok(())
 }
 
-fn handle_setup_edit_keys(app: &mut OperatorTuiApp, field: SetupField, code: KeyCode) -> Result<bool, String> {
+fn handle_setup_edit_keys(
+    app: &mut OperatorTuiApp,
+    field: SetupField,
+    code: KeyCode,
+) -> Result<bool, String> {
     match code {
         KeyCode::Esc => return Ok(true),
         KeyCode::Backspace => {
@@ -610,10 +631,8 @@ fn handle_setup_edit_keys(app: &mut OperatorTuiApp, field: SetupField, code: Key
             app.input_buffer.clear();
             return Ok(true);
         }
-        KeyCode::Char(ch) => {
-            if app.input_buffer.len() < MAX_INPUT_BUFFER_LEN {
-                app.input_buffer.push(ch);
-            }
+        KeyCode::Char(ch) if app.input_buffer.len() < MAX_INPUT_BUFFER_LEN => {
+            app.input_buffer.push(ch);
         }
         _ => {}
     }
@@ -660,19 +679,12 @@ fn handle_audit_search_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<b
             app.input_buffer.pop();
         }
         KeyCode::Enter => {
-            app.audit.search = app
-                .input_buffer
-                .trim()
-                .chars()
-                .take(MAX_AUDIT_SEARCH_LEN)
-                .collect();
+            app.audit.search = app.input_buffer.trim().chars().take(MAX_AUDIT_SEARCH_LEN).collect();
             app.status = format!("updated audit search: {:?}", app.audit.search);
             return Ok(true);
         }
-        KeyCode::Char(ch) => {
-            if app.input_buffer.len() < MAX_INPUT_BUFFER_LEN {
-                app.input_buffer.push(ch);
-            }
+        KeyCode::Char(ch) if app.input_buffer.len() < MAX_INPUT_BUFFER_LEN => {
+            app.input_buffer.push(ch);
         }
         _ => {}
     }
@@ -695,7 +707,9 @@ fn build_diagnostics_summary(
     DiagnosticsSummary {
         local_self_check: local_self_check.clone(),
         audit_db_health,
-        dependency_snapshot_status: dependency_snapshot_status(&startup.app.diagnostics.security_snapshot_path),
+        dependency_snapshot_status: dependency_snapshot_status(
+            &startup.app.diagnostics.security_snapshot_path,
+        ),
         integrity_verify_result: if startup.app.integrity.config_signature.is_some() {
             "detached signature verified on load".to_string()
         } else {
@@ -711,7 +725,10 @@ fn build_diagnostics_summary(
         writable_paths: vec![
             writable_parent_label("config", &startup.config_path),
             writable_parent_label("audit", &startup.app.audit.sqlite_path),
-            writable_parent_label("security snapshot", &startup.app.diagnostics.security_snapshot_path),
+            writable_parent_label(
+                "security snapshot",
+                &startup.app.diagnostics.security_snapshot_path,
+            ),
         ],
         recommendations: runtime_recommendations(lsm_status, hardening_status),
     }
@@ -787,10 +804,7 @@ fn load_audit_state(startup: &LoadedStartupConfig, audit_limit: usize) -> AuditS
 }
 
 fn build_setup_field_block(app: &OperatorTuiApp) -> String {
-    let mut out = vec![format!(
-        "{}\n",
-        setup_page_help(app.setup.page)
-    )];
+    let mut out = vec![format!("{}\n", setup_page_help(app.setup.page))];
 
     for (index, field) in setup_fields_for_page(app.setup.page).iter().enumerate() {
         let marker = if index == app.setup.selected { ">" } else { " " };
@@ -876,15 +890,23 @@ fn writable_parent_label(label: &str, path: &Path) -> String {
     format!("{label}: {}", parent.display())
 }
 
-fn runtime_recommendations(lsm_status: &LsmStatus, hardening_status: &HardeningStatus) -> Vec<String> {
+fn runtime_recommendations(
+    lsm_status: &LsmStatus,
+    hardening_status: &HardeningStatus,
+) -> Vec<String> {
     let mut out = Vec::new();
     if lsm_status.major_lsm.is_none() {
         out.push("- prefer running under AppArmor or SELinux confinement".to_string());
     }
     if !hardening_status.hardened_x64_requested {
-        out.push("- consider hardened-x64 release profile for Linux x86_64 deployments".to_string());
+        out.push(
+            "- consider hardened-x64 release profile for Linux x86_64 deployments".to_string(),
+        );
     }
-    out.push("- mount state directories writable but keep source tree read-only in service/container".to_string());
+    out.push(
+        "- mount state directories writable but keep source tree read-only in service/container"
+            .to_string(),
+    );
     out.push("- keep OO_CONFIG_PATH and audit sqlite on persistent storage".to_string());
     out
 }
@@ -899,7 +921,11 @@ fn filtered_audit_rows(audit: &AuditState) -> Vec<AuditEventRow> {
             } else {
                 let haystack = format!(
                     "{} {} {} {} {}",
-                    row.event_type, row.detector_backend, row.selected_action, row.suppressed_reason, row.mode
+                    row.event_type,
+                    row.detector_backend,
+                    row.selected_action,
+                    row.suppressed_reason,
+                    row.mode
                 )
                 .to_ascii_lowercase();
                 haystack.contains(&audit.search.to_ascii_lowercase())
@@ -914,10 +940,14 @@ fn filtered_audit_rows(audit: &AuditState) -> Vec<AuditEventRow> {
         .collect::<Vec<_>>();
 
     match audit.sort {
-        AuditSort::NewestFirst => rows.sort_by(|a, b| b.event_id.cmp(&a.event_id)),
-        AuditSort::OldestFirst => rows.sort_by(|a, b| a.event_id.cmp(&b.event_id)),
-        AuditSort::EventType => rows.sort_by(|a, b| a.event_type.cmp(&b.event_type).then(a.event_id.cmp(&b.event_id))),
-        AuditSort::Mode => rows.sort_by(|a, b| a.mode.cmp(&b.mode).then(a.event_id.cmp(&b.event_id))),
+        AuditSort::NewestFirst => rows.sort_by_key(|row| std::cmp::Reverse(row.event_id)),
+        AuditSort::OldestFirst => rows.sort_by_key(|row| row.event_id),
+        AuditSort::EventType => {
+            rows.sort_by(|a, b| a.event_type.cmp(&b.event_type).then(a.event_id.cmp(&b.event_id)))
+        }
+        AuditSort::Mode => {
+            rows.sort_by(|a, b| a.mode.cmp(&b.mode).then(a.event_id.cmp(&b.event_id)))
+        }
     }
 
     rows
@@ -927,11 +957,7 @@ fn format_counts(counts: &BTreeMap<String, usize>) -> String {
     if counts.is_empty() {
         return "none".to_string();
     }
-    counts
-        .iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect::<Vec<_>>()
-        .join(", ")
+    counts.iter().map(|(key, value)| format!("{key}={value}")).collect::<Vec<_>>().join(", ")
 }
 
 fn previous_setup_page(page: SetupPage) -> SetupPage {
@@ -999,35 +1025,75 @@ fn selected_setup_field(setup: &SetupState) -> Option<SetupField> {
 
 fn restore_default_for_field(setup: &mut SetupState, field: SetupField) {
     match field {
-        SetupField::DetectorBackend => setup.draft.detector.backend = setup.defaults.detector.backend,
-        SetupField::TargetReadings => setup.draft.detector.target_readings = setup.defaults.detector.target_readings.clone(),
-        SetupField::LiteralSequencePatterns => setup.draft.detector.literal_sequence_patterns = setup.defaults.detector.literal_sequence_patterns.clone(),
-        SetupField::SpecialPhrases => setup.draft.detector.special_phrases = setup.defaults.detector.special_phrases.clone(),
+        SetupField::DetectorBackend => {
+            setup.draft.detector.backend = setup.defaults.detector.backend
+        }
+        SetupField::TargetReadings => {
+            setup.draft.detector.target_readings = setup.defaults.detector.target_readings.clone()
+        }
+        SetupField::LiteralSequencePatterns => {
+            setup.draft.detector.literal_sequence_patterns =
+                setup.defaults.detector.literal_sequence_patterns.clone()
+        }
+        SetupField::SpecialPhrases => {
+            setup.draft.detector.special_phrases = setup.defaults.detector.special_phrases.clone()
+        }
         SetupField::StampText => setup.draft.bot.stamp_text = setup.defaults.bot.stamp_text.clone(),
-        SetupField::SendTemplate => setup.draft.bot.send_template = setup.defaults.bot.send_template.clone(),
-        SetupField::ReactionEmojiId => setup.draft.bot.reaction.emoji_id = setup.defaults.bot.reaction.emoji_id,
-        SetupField::ReactionEmojiName => setup.draft.bot.reaction.emoji_name = setup.defaults.bot.reaction.emoji_name.clone(),
-        SetupField::ReactionAnimated => setup.draft.bot.reaction.animated = setup.defaults.bot.reaction.animated,
+        SetupField::SendTemplate => {
+            setup.draft.bot.send_template = setup.defaults.bot.send_template.clone()
+        }
+        SetupField::ReactionEmojiId => {
+            setup.draft.bot.reaction.emoji_id = setup.defaults.bot.reaction.emoji_id
+        }
+        SetupField::ReactionEmojiName => {
+            setup.draft.bot.reaction.emoji_name = setup.defaults.bot.reaction.emoji_name.clone()
+        }
+        SetupField::ReactionAnimated => {
+            setup.draft.bot.reaction.animated = setup.defaults.bot.reaction.animated
+        }
         SetupField::MaxCountCap => setup.draft.bot.max_count_cap = setup.defaults.bot.max_count_cap,
-        SetupField::MaxSendChars => setup.draft.bot.max_send_chars = setup.defaults.bot.max_send_chars,
-        SetupField::ActionPolicy => setup.draft.bot.action_policy = setup.defaults.bot.action_policy.clone(),
-        SetupField::AuditSqlitePath => setup.draft.audit.sqlite_path = setup.defaults.audit.sqlite_path.clone(),
-        SetupField::AuditExportMaxRows => setup.draft.audit.export_max_rows = setup.defaults.audit.export_max_rows,
-        SetupField::AuditQueryMaxRows => setup.draft.audit.query_max_rows = setup.defaults.audit.query_max_rows,
-        SetupField::PseudoIdHmacKeyEnv => setup.draft.integrity.pseudo_id_hmac_key_env = setup.defaults.integrity.pseudo_id_hmac_key_env.clone(),
-        SetupField::SignatureEnabled => setup.draft.integrity.config_signature = setup.defaults.integrity.config_signature.clone(),
+        SetupField::MaxSendChars => {
+            setup.draft.bot.max_send_chars = setup.defaults.bot.max_send_chars
+        }
+        SetupField::ActionPolicy => {
+            setup.draft.bot.action_policy = setup.defaults.bot.action_policy.clone()
+        }
+        SetupField::AuditSqlitePath => {
+            setup.draft.audit.sqlite_path = setup.defaults.audit.sqlite_path.clone()
+        }
+        SetupField::AuditExportMaxRows => {
+            setup.draft.audit.export_max_rows = setup.defaults.audit.export_max_rows
+        }
+        SetupField::AuditQueryMaxRows => {
+            setup.draft.audit.query_max_rows = setup.defaults.audit.query_max_rows
+        }
+        SetupField::PseudoIdHmacKeyEnv => {
+            setup.draft.integrity.pseudo_id_hmac_key_env =
+                setup.defaults.integrity.pseudo_id_hmac_key_env.clone()
+        }
+        SetupField::SignatureEnabled => {
+            setup.draft.integrity.config_signature =
+                setup.defaults.integrity.config_signature.clone()
+        }
         SetupField::SignaturePath => {
-            setup.draft.integrity.config_signature = setup.defaults.integrity.config_signature.clone();
+            setup.draft.integrity.config_signature =
+                setup.defaults.integrity.config_signature.clone();
         }
         SetupField::SignatureHmacEnv => {
-            setup.draft.integrity.config_signature = setup.defaults.integrity.config_signature.clone();
+            setup.draft.integrity.config_signature =
+                setup.defaults.integrity.config_signature.clone();
         }
-        SetupField::LocalSelfCheck => setup.draft.diagnostics.local_self_check_on_startup = setup.defaults.diagnostics.local_self_check_on_startup,
+        SetupField::LocalSelfCheck => {
+            setup.draft.diagnostics.local_self_check_on_startup =
+                setup.defaults.diagnostics.local_self_check_on_startup
+        }
         SetupField::VerifyHardeningArtifacts => {
-            setup.draft.diagnostics.verify_hardening_artifacts = setup.defaults.diagnostics.verify_hardening_artifacts;
+            setup.draft.diagnostics.verify_hardening_artifacts =
+                setup.defaults.diagnostics.verify_hardening_artifacts;
         }
         SetupField::VerifyGeneratedArtifacts => {
-            setup.draft.diagnostics.verify_generated_artifacts = setup.defaults.diagnostics.verify_generated_artifacts;
+            setup.draft.diagnostics.verify_generated_artifacts =
+                setup.defaults.diagnostics.verify_generated_artifacts;
         }
         SetupField::DependencySecurityCheckMode => {
             setup.draft.diagnostics.dependency_security_check_mode =
@@ -1043,9 +1109,15 @@ fn cycle_field_value(setup: &mut SetupState, field: SetupField) {
         }
         SetupField::ActionPolicy => {
             setup.draft.bot.action_policy = match setup.draft.bot.action_policy {
-                crate::app::analyze_message::ActionPolicy::ReactOrSend => crate::app::analyze_message::ActionPolicy::ReactOnly,
-                crate::app::analyze_message::ActionPolicy::ReactOnly => crate::app::analyze_message::ActionPolicy::NoOutbound,
-                crate::app::analyze_message::ActionPolicy::NoOutbound => crate::app::analyze_message::ActionPolicy::ReactOrSend,
+                crate::app::analyze_message::ActionPolicy::ReactOrSend => {
+                    crate::app::analyze_message::ActionPolicy::ReactOnly
+                }
+                crate::app::analyze_message::ActionPolicy::ReactOnly => {
+                    crate::app::analyze_message::ActionPolicy::NoOutbound
+                }
+                crate::app::analyze_message::ActionPolicy::NoOutbound => {
+                    crate::app::analyze_message::ActionPolicy::ReactOrSend
+                }
             };
         }
         SetupField::LocalSelfCheck => {
@@ -1063,25 +1135,34 @@ fn cycle_field_value(setup: &mut SetupState, field: SetupField) {
         SetupField::DependencySecurityCheckMode => {
             setup.draft.diagnostics.dependency_security_check_mode =
                 match setup.draft.diagnostics.dependency_security_check_mode {
-                    crate::config::DependencySecurityCheckMode::Disabled => crate::config::DependencySecurityCheckMode::OfflineSnapshot,
-                    crate::config::DependencySecurityCheckMode::OfflineSnapshot => crate::config::DependencySecurityCheckMode::Disabled,
+                    crate::config::DependencySecurityCheckMode::Disabled => {
+                        crate::config::DependencySecurityCheckMode::OfflineSnapshot
+                    }
+                    crate::config::DependencySecurityCheckMode::OfflineSnapshot => {
+                        crate::config::DependencySecurityCheckMode::Disabled
+                    }
                 };
         }
         SetupField::SignatureEnabled => {
-            setup.draft.integrity.config_signature = if setup.draft.integrity.config_signature.is_some() {
-                None
-            } else {
-                Some(ConfigSignatureConfig {
-                    detached_hmac_sha256_path: PathBuf::from("config/oo-bot.yaml.sig"),
-                    hmac_key_env: "OO_CONFIG_HMAC_KEY".to_string(),
-                })
-            };
+            setup.draft.integrity.config_signature =
+                if setup.draft.integrity.config_signature.is_some() {
+                    None
+                } else {
+                    Some(ConfigSignatureConfig {
+                        detached_hmac_sha256_path: PathBuf::from("config/oo-bot.yaml.sig"),
+                        hmac_key_env: "OO_CONFIG_HMAC_KEY".to_string(),
+                    })
+                };
         }
         _ => {}
     }
 }
 
-fn apply_custom_field_input(setup: &mut SetupState, field: SetupField, raw: &str) -> Result<(), String> {
+fn apply_custom_field_input(
+    setup: &mut SetupState,
+    field: SetupField,
+    raw: &str,
+) -> Result<(), String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         restore_default_for_field(setup, field);
@@ -1090,7 +1171,8 @@ fn apply_custom_field_input(setup: &mut SetupState, field: SetupField, raw: &str
 
     match field {
         SetupField::DetectorBackend => {
-            setup.draft.detector.backend = serde_yaml::from_str(trimmed).map_err(|err| err.to_string())?;
+            setup.draft.detector.backend =
+                serde_yaml::from_str(trimmed).map_err(|err| err.to_string())?;
         }
         SetupField::TargetReadings => setup.draft.detector.target_readings = parse_csv(trimmed),
         SetupField::LiteralSequencePatterns => {
@@ -1116,8 +1198,9 @@ fn apply_custom_field_input(setup: &mut SetupState, field: SetupField, raw: &str
         SetupField::ActionPolicy => {}
         SetupField::AuditSqlitePath => setup.draft.audit.sqlite_path = PathBuf::from(trimmed),
         SetupField::AuditExportMaxRows => {
-            setup.draft.audit.export_max_rows =
-                trimmed.parse::<usize>().map_err(|_| "export_max_rows must be usize".to_string())?;
+            setup.draft.audit.export_max_rows = trimmed
+                .parse::<usize>()
+                .map_err(|_| "export_max_rows must be usize".to_string())?;
         }
         SetupField::AuditQueryMaxRows => {
             setup.draft.audit.query_max_rows =
@@ -1202,7 +1285,9 @@ fn setup_field_value(config: &StartupConfig, field: SetupField) -> String {
         SetupField::AuditSqlitePath => config.audit.sqlite_path.display().to_string(),
         SetupField::AuditExportMaxRows => config.audit.export_max_rows.to_string(),
         SetupField::AuditQueryMaxRows => config.audit.query_max_rows.to_string(),
-        SetupField::PseudoIdHmacKeyEnv => config.integrity.pseudo_id_hmac_key_env.clone().unwrap_or_default(),
+        SetupField::PseudoIdHmacKeyEnv => {
+            config.integrity.pseudo_id_hmac_key_env.clone().unwrap_or_default()
+        }
         SetupField::SignatureEnabled => config.integrity.config_signature.is_some().to_string(),
         SetupField::SignaturePath => config
             .integrity
@@ -1217,9 +1302,15 @@ fn setup_field_value(config: &StartupConfig, field: SetupField) -> String {
             .map(|value| value.hmac_key_env.clone())
             .unwrap_or_else(|| "disabled".to_string()),
         SetupField::LocalSelfCheck => config.diagnostics.local_self_check_on_startup.to_string(),
-        SetupField::VerifyHardeningArtifacts => config.diagnostics.verify_hardening_artifacts.to_string(),
-        SetupField::VerifyGeneratedArtifacts => config.diagnostics.verify_generated_artifacts.to_string(),
-        SetupField::DependencySecurityCheckMode => serde_variant_name(&config.diagnostics.dependency_security_check_mode),
+        SetupField::VerifyHardeningArtifacts => {
+            config.diagnostics.verify_hardening_artifacts.to_string()
+        }
+        SetupField::VerifyGeneratedArtifacts => {
+            config.diagnostics.verify_generated_artifacts.to_string()
+        }
+        SetupField::DependencySecurityCheckMode => {
+            serde_variant_name(&config.diagnostics.dependency_security_check_mode)
+        }
     }
 }
 
@@ -1243,7 +1334,11 @@ fn serde_variant_name<T: serde::Serialize>(value: &T) -> String {
 }
 
 fn check_status_label(healthy: bool) -> &'static str {
-    if healthy { "pass" } else { "warn/fail" }
+    if healthy {
+        "pass"
+    } else {
+        "warn/fail"
+    }
 }
 
 fn format_check_status(status: &CheckStatus) -> &'static str {
@@ -1282,7 +1377,8 @@ mod tests {
         LoadedStartupConfig {
             app: canonical_startup_config(),
             config_path: PathBuf::from("config/oo-bot.yaml"),
-            config_fingerprint: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
+            config_fingerprint: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                .to_string(),
             pseudo_id_hmac_key: None,
         }
     }
@@ -1290,9 +1386,7 @@ mod tests {
     fn render_snapshot(app: &OperatorTuiApp, width: u16, height: u16) -> String {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("test terminal");
-        terminal
-            .draw(|frame| render_app(frame, app))
-            .expect("draw snapshot");
+        terminal.draw(|frame| render_app(frame, app)).expect("draw snapshot");
         let buffer = terminal.backend().buffer().clone();
         let mut lines = Vec::new();
         for y in 0..height {
@@ -1307,10 +1401,7 @@ mod tests {
 
     fn sample_app(screen: Screen) -> OperatorTuiApp {
         let startup = sample_startup();
-        let local_self_check = LocalSelfCheckReport {
-            healthy: true,
-            items: vec![],
-        };
+        let local_self_check = LocalSelfCheckReport { healthy: true, items: vec![] };
         OperatorTuiApp {
             status: "snapshot".to_string(),
             startup_created: false,
@@ -1337,10 +1428,17 @@ mod tests {
                 audit_db_health: "verified 10 recent rows".to_string(),
                 dependency_snapshot_status: "present".to_string(),
                 integrity_verify_result: "unsigned config".to_string(),
-                export_safe_policy_status: "export cap=50000 query cap=10000 pseudo-id=disabled".to_string(),
+                export_safe_policy_status: "export cap=50000 query cap=10000 pseudo-id=disabled"
+                    .to_string(),
                 confinement_state: "AppArmor profile docker-default".to_string(),
-                writable_paths: vec!["config: config".to_string(), "audit: state/audit".to_string()],
-                recommendations: vec!["- prefer AppArmor".to_string(), "- keep state persistent".to_string()],
+                writable_paths: vec![
+                    "config: config".to_string(),
+                    "audit: state/audit".to_string(),
+                ],
+                recommendations: vec![
+                    "- prefer AppArmor".to_string(),
+                    "- keep state persistent".to_string(),
+                ],
             },
             setup: SetupState {
                 draft: startup.app.clone(),
@@ -1400,7 +1498,10 @@ mod tests {
     fn dashboard_snapshot_wide() {
         let app = sample_app(Screen::Dashboard);
         let snapshot = render_snapshot(&app, 100, 24);
-        assert_eq!(snapshot, include_str!("../tests/snapshots/operator_dashboard_wide.txt").trim_end());
+        assert_eq!(
+            snapshot,
+            include_str!("../tests/snapshots/operator_dashboard_wide.txt").trim_end()
+        );
     }
 
     #[test]
@@ -1408,6 +1509,64 @@ mod tests {
         let mut app = sample_app(Screen::Setup);
         app.setup.page = SetupPage::Preview;
         let snapshot = render_snapshot(&app, 72, 26);
-        assert_eq!(snapshot, include_str!("../tests/snapshots/operator_setup_preview_narrow.txt").trim_end());
+        assert_eq!(
+            snapshot,
+            include_str!("../tests/snapshots/operator_setup_preview_narrow.txt").trim_end()
+        );
+    }
+
+    #[test]
+    fn audit_filter_ignores_raw_identifiers_and_sorts_descending() {
+        let mut app = sample_app(Screen::Audit);
+        app.audit.rows = vec![
+            AuditEventRow {
+                event_id: 2,
+                pseudo_user_id: "raw-user-should-not-match".to_string(),
+                matched_readings_json: "[\"secret-reading\"]".to_string(),
+                ..app.audit.rows[0].clone()
+            },
+            AuditEventRow {
+                event_id: 7,
+                event_type: "suppressed".to_string(),
+                detector_backend: "sandbox_plugin".to_string(),
+                selected_action: "reaction".to_string(),
+                suppressed_reason: "duplicate_guard".to_string(),
+                mode: "observe_only".to_string(),
+                ..app.audit.rows[0].clone()
+            },
+        ];
+        app.audit.search = "raw-user-should-not-match".to_string();
+        assert!(filtered_audit_rows(&app.audit).is_empty());
+
+        app.audit.search = "duplicate_guard".to_string();
+        let filtered = filtered_audit_rows(&app.audit);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].event_id, 7);
+
+        app.audit.search.clear();
+        app.audit.sort = AuditSort::NewestFirst;
+        let filtered = filtered_audit_rows(&app.audit);
+        assert_eq!(filtered[0].event_id, 7);
+        assert_eq!(filtered[1].event_id, 2);
+    }
+
+    #[test]
+    fn audit_render_hides_raw_identifiers_and_message_like_content() {
+        let mut app = sample_app(Screen::Audit);
+        app.audit.rows[0].pseudo_guild_id = "guild-raw-id".to_string();
+        app.audit.rows[0].pseudo_channel_id = "channel-raw-id".to_string();
+        app.audit.rows[0].pseudo_user_id = "user-raw-id".to_string();
+        app.audit.rows[0].pseudo_message_id = "message-raw-id".to_string();
+        app.audit.rows[0].matched_readings_json = "[\"super-secret-reading\"]".to_string();
+        app.audit.rows[0].suspicious_flags_json = "[\"raw-message-fragment\"]".to_string();
+
+        let snapshot = render_snapshot(&app, 100, 24);
+        assert!(snapshot.contains("backend=morphological_reading"));
+        assert!(!snapshot.contains("guild-raw-id"));
+        assert!(!snapshot.contains("channel-raw-id"));
+        assert!(!snapshot.contains("user-raw-id"));
+        assert!(!snapshot.contains("message-raw-id"));
+        assert!(!snapshot.contains("super-secret-reading"));
+        assert!(!snapshot.contains("raw-message-fragment"));
     }
 }

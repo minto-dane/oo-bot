@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use tracing::error;
 
 use crate::domain::detector::{
-    DetectionReport, DetectorBackendKind, DetectorPolicy, MessageDetector, MorphologicalReadingDetector,
+    DetectionReport, DetectorBackendKind, DetectorPolicy, MessageDetector,
+    MorphologicalReadingDetector,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,11 +48,7 @@ impl Default for BotConfig {
 }
 
 #[must_use]
-pub fn analyze_message(
-    content: &str,
-    author_is_bot: bool,
-    config: &BotConfig,
-) -> BotAction {
+pub fn analyze_message(content: &str, author_is_bot: bool, config: &BotConfig) -> BotAction {
     analyze_message_with_detector(content, author_is_bot, config, default_detector())
 }
 
@@ -173,7 +170,11 @@ impl MessageDetector for NoHitDetector {
     }
 }
 
-fn render_send_template(config: &BotConfig, count: usize, report: &DetectionReport) -> Option<String> {
+fn render_send_template(
+    config: &BotConfig,
+    count: usize,
+    report: &DetectionReport,
+) -> Option<String> {
     let mut output = config.send_template.clone();
 
     let placeholders = [
@@ -182,7 +183,9 @@ fn render_send_template(config: &BotConfig, count: usize, report: &DetectionRepo
         ("${matched_backend}", sanitize_template_value(report.matched_backend)),
         (
             "${matched_reading}",
-            sanitize_template_value(report.matched_readings.first().map(String::as_str).unwrap_or_default()),
+            sanitize_template_value(
+                report.matched_readings.first().map(String::as_str).unwrap_or_default(),
+            ),
         ),
         ("${action_kind}", sanitize_template_value("send_message")),
     ];
@@ -195,11 +198,7 @@ fn render_send_template(config: &BotConfig, count: usize, report: &DetectionRepo
         return None;
     }
 
-    let expanded = if output == config.stamp_text {
-        join_repeated(&output, count)
-    } else {
-        output
-    };
+    let expanded = if output == config.stamp_text { join_repeated(&output, count) } else { output };
 
     let capped: String = expanded.chars().take(config.max_send_chars).collect();
     if capped.is_empty() {
@@ -252,10 +251,7 @@ mod tests {
 
     #[test]
     fn react_only_policy_downgrades_send() {
-        let cfg = BotConfig {
-            action_policy: ActionPolicy::ReactOnly,
-            ..BotConfig::default()
-        };
+        let cfg = BotConfig { action_policy: ActionPolicy::ReactOnly, ..BotConfig::default() };
         let action = analyze_message("おおoo", false, &cfg);
         assert!(matches!(action, BotAction::React { .. }));
     }

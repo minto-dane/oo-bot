@@ -67,11 +67,7 @@ pub struct ToolExecutionPolicy {
 
 impl Default for ToolExecutionPolicy {
     fn default() -> Self {
-        Self {
-            timeout: Duration::from_secs(30),
-            output_cap_bytes: 32 * 1024,
-            allow_network: false,
-        }
+        Self { timeout: Duration::from_secs(30), output_cap_bytes: 32 * 1024, allow_network: false }
     }
 }
 
@@ -83,16 +79,10 @@ pub fn run_local_self_check(startup: &LoadedStartupConfig) -> LocalSelfCheckRepo
         "pinned_hardened_toolchain",
         Path::new("ci/hardened-x64/rust-toolchain.toml"),
     ));
-    items.push(check_file_exists(
-        "hardening_verifier",
-        Path::new("scripts/verify_hardening.sh"),
-    ));
+    items.push(check_file_exists("hardening_verifier", Path::new("scripts/verify_hardening.sh")));
 
     if startup.app.diagnostics.verify_generated_artifacts {
-        items.push(check_file_exists(
-            "startup_config",
-            &startup.config_path,
-        ));
+        items.push(check_file_exists("startup_config", &startup.config_path));
         items.push(check_file_exists(
             "hardening_script",
             Path::new("scripts/build_hardened_x64.sh"),
@@ -156,20 +146,8 @@ pub fn run_security_diagnostics(
     } else {
         vec!["audit"]
     };
-    results.push(run_tool(
-        "cargo-audit",
-        "cargo",
-        &cargo_audit_args,
-        policy,
-        network_used,
-    ));
-    results.push(run_tool(
-        "cargo-deny",
-        "cargo",
-        &["deny", "check"],
-        policy,
-        network_used,
-    ));
+    results.push(run_tool("cargo-audit", "cargo", &cargo_audit_args, policy, network_used));
+    results.push(run_tool("cargo-deny", "cargo", &["deny", "check"], policy, network_used));
     results.push(run_tool(
         "cargo-geiger",
         "cargo",
@@ -191,7 +169,10 @@ pub fn run_security_diagnostics(
     })
 }
 
-pub fn write_security_snapshot(report: &SecurityDiagnosticsReport, path: &Path) -> Result<(), String> {
+pub fn write_security_snapshot(
+    report: &SecurityDiagnosticsReport,
+    path: &Path,
+) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
@@ -208,11 +189,8 @@ fn run_tool(
     network_used: bool,
 ) -> ToolCheckResult {
     let invocation = format!("{} {}", program, args.join(" "));
-    let spawn = Command::new(program)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
+    let spawn =
+        Command::new(program).args(args).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn();
 
     let mut child = match spawn {
         Ok(child) => child,
@@ -276,9 +254,7 @@ fn run_tool(
     let lower = summary.to_ascii_lowercase();
     let missing_subcommand = lower.contains("no such command") || lower.contains("not found");
 
-    let status = if timed_out {
-        CheckStatus::Warn
-    } else if missing_subcommand {
+    let status = if timed_out || missing_subcommand {
         CheckStatus::Warn
     } else if exit_code == Some(0) {
         CheckStatus::Pass
@@ -302,11 +278,7 @@ fn run_tool(
 
 fn summarize_and_redact(bytes: &[u8], cap: usize) -> String {
     let cap = cap.max(64);
-    let (slice, truncated) = if bytes.len() > cap {
-        (&bytes[..cap], true)
-    } else {
-        (bytes, false)
-    };
+    let (slice, truncated) = if bytes.len() > cap { (&bytes[..cap], true) } else { (bytes, false) };
     let text = String::from_utf8_lossy(slice);
     let mut summary = redact_sensitive(text.trim());
     if truncated {
@@ -317,13 +289,7 @@ fn summarize_and_redact(bytes: &[u8], cap: usize) -> String {
 
 pub fn redact_sensitive(input: &str) -> String {
     let mut output = input.to_string();
-    for key in [
-        "DISCORD_TOKEN",
-        "OO_PSEUDO_ID_HMAC_KEY",
-        "TOKEN",
-        "SECRET",
-        "PASSWORD",
-    ] {
+    for key in ["DISCORD_TOKEN", "OO_PSEUDO_ID_HMAC_KEY", "TOKEN", "SECRET", "PASSWORD"] {
         output = redact_key_value_pair(&output, key);
     }
     output
@@ -381,10 +347,8 @@ fn check_audit_health(cfg: &AuditStoreConfig, max_rows: usize) -> SelfCheckItem 
         }
     };
 
-    let last = match store.tail(&AuditQueryFilter {
-        limit: Some(1),
-        ..AuditQueryFilter::default()
-    }) {
+    let last = match store.tail(&AuditQueryFilter { limit: Some(1), ..AuditQueryFilter::default() })
+    {
         Ok(rows) => rows,
         Err(err) => {
             return SelfCheckItem {
@@ -446,10 +410,7 @@ mod tests {
     fn online_mode_requires_explicit_opt_in() {
         let report = run_security_diagnostics(
             SecurityDiagnosticsMode::Online,
-            ToolExecutionPolicy {
-                allow_network: false,
-                ..ToolExecutionPolicy::default()
-            },
+            ToolExecutionPolicy { allow_network: false, ..ToolExecutionPolicy::default() },
         );
         assert!(report.is_err());
     }

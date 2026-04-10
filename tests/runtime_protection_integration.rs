@@ -44,10 +44,7 @@ fn duplicate_message_is_suppressed() {
     let mut core = core_with_default();
 
     let first = core.decide_message(test_context(100), "oo");
-    assert!(matches!(
-        first.action,
-        BotAction::React { .. } | BotAction::SendMessage { .. }
-    ));
+    assert!(matches!(first.action, BotAction::React { .. } | BotAction::SendMessage { .. }));
 
     let second = core.decide_message(test_context(100), "oo");
     assert_eq!(second.action, BotAction::Noop);

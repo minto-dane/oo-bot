@@ -248,16 +248,17 @@ fn embedded_default_yaml() -> Result<&'static serde_yaml::Value, StartupConfigEr
 fn embedded_yaml_lookup(path: &[&str]) -> Result<&'static serde_yaml::Value, StartupConfigError> {
     let mut current = embedded_default_yaml()?;
     for segment in path {
-        current = current
-            .get(*segment)
-            .ok_or_else(|| StartupConfigError::EmbeddedDefault(format!("missing key: {}", path.join("."))))?;
+        current = current.get(*segment).ok_or_else(|| {
+            StartupConfigError::EmbeddedDefault(format!("missing key: {}", path.join(".")))
+        })?;
     }
     Ok(current)
 }
 
 fn embedded_default_value<T: DeserializeOwned>(path: &[&str]) -> Result<T, StartupConfigError> {
     let value = embedded_yaml_lookup(path)?.clone();
-    serde_yaml::from_value(value).map_err(|err| StartupConfigError::EmbeddedDefault(err.to_string()))
+    serde_yaml::from_value(value)
+        .map_err(|err| StartupConfigError::EmbeddedDefault(err.to_string()))
 }
 
 pub fn startup_config_path() -> PathBuf {
@@ -310,19 +311,23 @@ fn default_config_signature() -> Option<ConfigSignatureConfig> {
 }
 
 fn default_pseudo_id_hmac_key_env() -> Option<String> {
-    embedded_default_value(&["integrity", "pseudo_id_hmac_key_env"]).expect("embedded default config")
+    embedded_default_value(&["integrity", "pseudo_id_hmac_key_env"])
+        .expect("embedded default config")
 }
 
 fn default_audit_verify_rows() -> usize {
-    embedded_default_value(&["diagnostics", "audit_verify_max_rows"]).expect("embedded default config")
+    embedded_default_value(&["diagnostics", "audit_verify_max_rows"])
+        .expect("embedded default config")
 }
 
 fn default_security_snapshot_path() -> PathBuf {
-    embedded_default_value(&["diagnostics", "security_snapshot_path"]).expect("embedded default config")
+    embedded_default_value(&["diagnostics", "security_snapshot_path"])
+        .expect("embedded default config")
 }
 
 fn default_dependency_security_check_mode() -> DependencySecurityCheckMode {
-    embedded_default_value(&["diagnostics", "dependency_security_check_mode"]).expect("embedded default config")
+    embedded_default_value(&["diagnostics", "dependency_security_check_mode"])
+        .expect("embedded default config")
 }
 
 pub fn load_startup_config() -> Result<LoadedStartupConfig, StartupConfigError> {
@@ -330,15 +335,11 @@ pub fn load_startup_config() -> Result<LoadedStartupConfig, StartupConfigError> 
 }
 
 pub fn canonical_startup_config() -> StartupConfig {
-    embedded_default_startup_config()
-        .expect("embedded default config")
-        .clone()
+    embedded_default_startup_config().expect("embedded default config").clone()
 }
 
 pub fn render_canonical_sample_config_yaml() -> Result<String, StartupConfigError> {
-    render_startup_config_yaml(
-        embedded_default_startup_config()?
-    )
+    render_startup_config_yaml(embedded_default_startup_config()?)
 }
 
 pub fn render_startup_config_yaml(config: &StartupConfig) -> Result<String, StartupConfigError> {
@@ -417,7 +418,8 @@ pub fn write_startup_config_to_path(
     fsync_directory(temp_dir.path())
         .map_err(|err| StartupConfigError::WriteConfig(err.to_string()))?;
 
-    fs::rename(&temp_config_path, path).map_err(|err| StartupConfigError::WriteConfig(err.to_string()))?;
+    fs::rename(&temp_config_path, path)
+        .map_err(|err| StartupConfigError::WriteConfig(err.to_string()))?;
 
     if let Some((temp_signature_path, signature_path)) = signature_rename {
         fs::rename(&temp_signature_path, &signature_path)
@@ -430,14 +432,16 @@ pub fn write_startup_config_to_path(
     Ok(())
 }
 
-pub fn load_startup_config_from_path(path: &Path) -> Result<LoadedStartupConfig, StartupConfigError> {
+pub fn load_startup_config_from_path(
+    path: &Path,
+) -> Result<LoadedStartupConfig, StartupConfigError> {
     let bytes = fs::read(path).map_err(|err| StartupConfigError::ReadConfig(err.to_string()))?;
     if bytes.len() > MAX_CONFIG_BYTES {
         return Err(StartupConfigError::TooLarge);
     }
 
-    let cfg: StartupConfig =
-        serde_yaml::from_slice(&bytes).map_err(|err| StartupConfigError::ParseConfig(err.to_string()))?;
+    let cfg: StartupConfig = serde_yaml::from_slice(&bytes)
+        .map_err(|err| StartupConfigError::ParseConfig(err.to_string()))?;
 
     validate_config(&cfg)?;
 
@@ -473,9 +477,7 @@ fn validate_config(cfg: &StartupConfig) -> Result<(), StartupConfigError> {
     }
 
     if cfg.detector.special_phrases.is_empty() {
-        return Err(StartupConfigError::Validate(
-            "special_phrases must not be empty".into(),
-        ));
+        return Err(StartupConfigError::Validate("special_phrases must not be empty".into()));
     }
 
     match cfg.detector.backend {
@@ -496,12 +498,7 @@ fn validate_config(cfg: &StartupConfig) -> Result<(), StartupConfigError> {
     if cfg.detector.target_readings.iter().any(|entry| entry.len() > MAX_READING_LEN) {
         return Err(StartupConfigError::Validate("target_readings entry too long".into()));
     }
-    if cfg
-        .detector
-        .literal_sequence_patterns
-        .iter()
-        .any(|entry| entry.len() > MAX_PATTERN_LEN)
-    {
+    if cfg.detector.literal_sequence_patterns.iter().any(|entry| entry.len() > MAX_PATTERN_LEN) {
         return Err(StartupConfigError::Validate(
             "literal_sequence_patterns entry too long".into(),
         ));
@@ -513,7 +510,9 @@ fn validate_config(cfg: &StartupConfig) -> Result<(), StartupConfigError> {
     if cfg.bot.send_template.is_empty() || cfg.bot.send_template.len() > MAX_TEMPLATE_LEN {
         return Err(StartupConfigError::Validate("send_template length is invalid".into()));
     }
-    if cfg.bot.reaction.emoji_name.is_empty() || cfg.bot.reaction.emoji_name.len() > MAX_EMOJI_NAME_LEN {
+    if cfg.bot.reaction.emoji_name.is_empty()
+        || cfg.bot.reaction.emoji_name.len() > MAX_EMOJI_NAME_LEN
+    {
         return Err(StartupConfigError::Validate("reaction.emoji_name length is invalid".into()));
     }
     if cfg.bot.reaction.emoji_id == 0 {
@@ -533,7 +532,8 @@ fn validate_config(cfg: &StartupConfig) -> Result<(), StartupConfigError> {
         return Err(StartupConfigError::Validate("audit.query_max_rows is invalid".into()));
     }
 
-    if cfg.diagnostics.audit_verify_max_rows == 0 || cfg.diagnostics.audit_verify_max_rows > 100_000 {
+    if cfg.diagnostics.audit_verify_max_rows == 0 || cfg.diagnostics.audit_verify_max_rows > 100_000
+    {
         return Err(StartupConfigError::Validate(
             "diagnostics.audit_verify_max_rows is invalid".into(),
         ));
@@ -564,10 +564,7 @@ fn validate_template(template: &str) -> Result<(), String> {
 }
 
 fn is_allowed_placeholder(value: &str) -> bool {
-    matches!(
-        value,
-        "count" | "stamp" | "matched_backend" | "matched_reading" | "action_kind"
-    )
+    matches!(value, "count" | "stamp" | "matched_backend" | "matched_reading" | "action_kind")
 }
 
 pub fn default_target_readings() -> Vec<String> {
@@ -575,7 +572,8 @@ pub fn default_target_readings() -> Vec<String> {
 }
 
 pub fn default_literal_sequence_patterns() -> Vec<String> {
-    embedded_default_value(&["detector", "literal_sequence_patterns"]).expect("embedded default config")
+    embedded_default_value(&["detector", "literal_sequence_patterns"])
+        .expect("embedded default config")
 }
 
 pub fn default_special_phrases() -> Vec<String> {
@@ -690,10 +688,16 @@ pub fn default_runtime_protection_config() -> RuntimeProtectionConfig {
             .expect("embedded default config"),
         breaker_open_ms: embedded_default_value(&["runtime", "breaker_open_ms"])
             .expect("embedded default config"),
-        sandbox_failure_window_ms: embedded_default_value(&["runtime", "sandbox_failure_window_ms"])
-            .expect("embedded default config"),
-        sandbox_failure_threshold: embedded_default_value(&["runtime", "sandbox_failure_threshold"])
-            .expect("embedded default config"),
+        sandbox_failure_window_ms: embedded_default_value(&[
+            "runtime",
+            "sandbox_failure_window_ms",
+        ])
+        .expect("embedded default config"),
+        sandbox_failure_threshold: embedded_default_value(&[
+            "runtime",
+            "sandbox_failure_threshold",
+        ])
+        .expect("embedded default config"),
         allow_guild_ids: embedded_default_value(&["runtime", "allow_guild_ids"])
             .expect("embedded default config"),
         deny_guild_ids: embedded_default_value(&["runtime", "deny_guild_ids"])
@@ -719,7 +723,8 @@ fn verify_detached_hmac(
     config_bytes: &[u8],
     signature: &ConfigSignatureConfig,
 ) -> Result<(), StartupConfigError> {
-    let signature_path = resolve_config_relative_path(config_path, &signature.detached_hmac_sha256_path);
+    let signature_path =
+        resolve_config_relative_path(config_path, &signature.detached_hmac_sha256_path);
     let signature_hex = fs::read_to_string(&signature_path)
         .map_err(|err| StartupConfigError::Signature(err.to_string()))?;
     let supplied = hex::decode(signature_hex.trim())
@@ -727,9 +732,8 @@ fn verify_detached_hmac(
 
     let mut mac = build_hmac_from_env(&signature.hmac_key_env)?;
     mac.update(config_bytes);
-    mac.verify_slice(&supplied).map_err(|_| {
-        StartupConfigError::Signature("detached config signature mismatch".into())
-    })?;
+    mac.verify_slice(&supplied)
+        .map_err(|_| StartupConfigError::Signature("detached config signature mismatch".into()))?;
 
     Ok(())
 }
@@ -772,17 +776,11 @@ fn resolve_config_relative_path(config_path: &Path, target: &Path) -> PathBuf {
         return target.to_path_buf();
     }
 
-    config_path
-        .parent()
-        .map(|parent| parent.join(target))
-        .unwrap_or_else(|| target.to_path_buf())
+    config_path.parent().map(|parent| parent.join(target)).unwrap_or_else(|| target.to_path_buf())
 }
 
 fn write_file_synced(path: &Path, content: &[u8]) -> Result<(), std::io::Error> {
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)?;
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).open(path)?;
     file.write_all(content)?;
     file.sync_all()
 }
@@ -801,7 +799,10 @@ fn resolve_optional_hmac_key(env_name: Option<&str>) -> Option<Vec<u8>> {
     match std::env::var(env_name) {
         Ok(value) if !value.trim().is_empty() => Some(value.into_bytes()),
         _ => {
-            warn!(key_env = env_name, "pseudo-id hmac key is not set; pseudo identifiers will be disabled");
+            warn!(
+                key_env = env_name,
+                "pseudo-id hmac key is not set; pseudo identifiers will be disabled"
+            );
             None
         }
     }

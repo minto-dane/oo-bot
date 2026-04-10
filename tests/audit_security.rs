@@ -1,6 +1,4 @@
-use discord_oo_bot::audit::{
-    AuditEventInput, AuditStore, AuditStoreConfig,
-};
+use discord_oo_bot::audit::{AuditEventInput, AuditStore, AuditStoreConfig};
 use tempfile::tempdir;
 
 #[test]

@@ -12,8 +12,8 @@ use tracing::{error, info, warn};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::{
-    audit::{AuditEventInput, AuditEventType, AuditStore},
     app::analyze_message::BotAction,
+    audit::{AuditEventInput, AuditEventType, AuditStore},
     security::core_governor::{ActionDecision, MessageContext, TrustedCore},
 };
 
@@ -54,7 +54,12 @@ impl EventHandler for Handler {
 
         log_decision(&msg, &decision);
 
-        self.record_decision_audit(message_ctx, &msg, &decision, started.elapsed().as_millis() as u64);
+        self.record_decision_audit(
+            message_ctx,
+            &msg,
+            &decision,
+            started.elapsed().as_millis() as u64,
+        );
 
         if matches!(decision.action, BotAction::Noop) {
             return;
@@ -152,7 +157,12 @@ impl Handler {
         }
     }
 
-    fn record_action_sent_audit(&self, message_ctx: MessageContext, msg: &Message, processing_time_ms: u64) {
+    fn record_action_sent_audit(
+        &self,
+        message_ctx: MessageContext,
+        msg: &Message,
+        processing_time_ms: u64,
+    ) {
         let Some(audit) = &self.audit else {
             return;
         };

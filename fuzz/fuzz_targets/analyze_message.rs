@@ -1,8 +1,6 @@
 #![no_main]
 
-use discord_oo_bot::{
-    app::analyze_message::{analyze_message, BotConfig},
-};
+use discord_oo_bot::app::analyze_message::{analyze_message, BotConfig};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

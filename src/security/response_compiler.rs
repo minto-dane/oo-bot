@@ -102,7 +102,9 @@ fn proposal_to_action(
                     "send_message",
                 );
                 match rendered {
-                    Some(content) if !content.trim().is_empty() => BotAction::SendMessage { content },
+                    Some(content) if !content.trim().is_empty() => {
+                        BotAction::SendMessage { content }
+                    }
                     _ => BotAction::Noop,
                 }
             }
@@ -226,10 +228,7 @@ mod tests {
 
     #[test]
     fn rejects_undefined_placeholder() {
-        let cfg = BotConfig {
-            send_template: "${unknown}".to_string(),
-            ..BotConfig::default()
-        };
+        let cfg = BotConfig { send_template: "${unknown}".to_string(), ..BotConfig::default() };
 
         let action = compile_response(&CompileContext {
             proposal: &ActionProposal::SendStamped { count: 3 },

@@ -30,13 +30,17 @@ pub fn detect_hardening_status() -> HardeningStatus {
     let hardened_x64_requested = std::env::var("OO_HARDENED_X64")
         .map(|value| matches!(value.as_str(), "1" | "true" | "yes"))
         .unwrap_or(false);
-    let effective_hardened =
-        hardened_x64_requested && std::env::consts::ARCH == "x86_64" && std::env::consts::OS == "linux";
+    let effective_hardened = hardened_x64_requested
+        && std::env::consts::ARCH == "x86_64"
+        && std::env::consts::OS == "linux";
 
     let mut warnings = Vec::new();
-    if hardened_x64_requested && !(std::env::consts::ARCH == "x86_64" && std::env::consts::OS == "linux") {
+    if hardened_x64_requested
+        && !(std::env::consts::ARCH == "x86_64" && std::env::consts::OS == "linux")
+    {
         warnings.push(
-            "hardened-x64 was requested on unsupported host; running with stable defaults".to_string(),
+            "hardened-x64 was requested on unsupported host; running with stable defaults"
+                .to_string(),
         );
     }
 

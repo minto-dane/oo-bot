@@ -1,6 +1,4 @@
-use discord_oo_bot::{
-    app::analyze_message::{analyze_message, BotAction, BotConfig},
-};
+use discord_oo_bot::app::analyze_message::{analyze_message, BotAction, BotConfig};
 
 fn stamp_count(content: &str) -> usize {
     content.split_whitespace().count()

@@ -13,11 +13,9 @@ fn morphological_backend_handles_kanji_tokens() {
 
 #[test]
 fn morphological_backend_handles_unreadable_tokens_safely() {
-    let morph = build_detector(
-        DetectorBackendKind::MorphologicalReading,
-        DetectorPolicy::default(),
-    )
-    .expect("morph backend should initialize");
+    let morph =
+        build_detector(DetectorBackendKind::MorphologicalReading, DetectorPolicy::default())
+            .expect("morph backend should initialize");
 
     let report = morph.detect("😀😀😀");
     assert_eq!(report.backend, DetectorBackendKind::MorphologicalReading);

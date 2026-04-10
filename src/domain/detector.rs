@@ -217,20 +217,16 @@ mod tests {
 
     #[test]
     fn morphological_backend_builds_with_embedded_ipadic() {
-        let detector = build_detector(
-            DetectorBackendKind::MorphologicalReading,
-            DetectorPolicy::default(),
-        );
+        let detector =
+            build_detector(DetectorBackendKind::MorphologicalReading, DetectorPolicy::default());
         assert!(detector.is_ok());
     }
 
     #[test]
     fn morphological_backend_detects_kana_and_kanji_words() {
-        let detector = build_detector(
-            DetectorBackendKind::MorphologicalReading,
-            DetectorPolicy::default(),
-        )
-        .expect("backend init");
+        let detector =
+            build_detector(DetectorBackendKind::MorphologicalReading, DetectorPolicy::default())
+                .expect("backend init");
 
         let kana = detector.detect("おお");
         assert!(kana.total_count >= 1);

@@ -237,7 +237,8 @@ impl TrustedCore {
     pub fn reset_suspicious_thresholds(&mut self) {
         self.suspicious_cfg.soft_char_limit = self.runtime.long_message_soft_chars;
         self.suspicious_cfg.hard_char_limit = self.runtime.long_message_hard_chars;
-        self.suspicious_cfg.repetition_threshold = self.runtime.suspicious_repetition_threshold.max(1);
+        self.suspicious_cfg.repetition_threshold =
+            self.runtime.suspicious_repetition_threshold.max(1);
     }
 
     pub fn update_session_budget(&mut self, total: u32, remaining: u32, reset_after_secs: u64) {
@@ -559,7 +560,9 @@ impl MessageDetector for NoHitDetector {
 fn is_outbound_proposal(proposal: &ActionProposal) -> bool {
     matches!(
         proposal,
-        ActionProposal::SpecialPhrase | ActionProposal::ReactOnce | ActionProposal::SendStamped { .. }
+        ActionProposal::SpecialPhrase
+            | ActionProposal::ReactOnce
+            | ActionProposal::SendStamped { .. }
     )
 }
 

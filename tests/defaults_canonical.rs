@@ -30,8 +30,8 @@ fn canonical_renderer_roundtrips_to_canonical_struct() {
 
 #[test]
 fn checked_in_sample_config_matches_canonical_defaults() {
-    let loaded = load_startup_config_from_path(Path::new("config/oo-bot.yaml"))
-        .expect("load sample config");
+    let loaded =
+        load_startup_config_from_path(Path::new("config/oo-bot.yaml")).expect("load sample config");
     let expected = canonical_startup_config();
 
     let loaded_json = serde_json::to_value(loaded.app).expect("json value loaded");

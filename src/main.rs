@@ -19,9 +19,7 @@ use discord_oo_bot::{
     operator_tui::{run_operator_tui, OperatorTuiEntry, OperatorTuiParams},
     sandbox::host::{SandboxConfig, WasmtimeSandboxAnalyzer},
     security::{
-        core_governor::TrustedCore,
-        hardening::detect_hardening_status,
-        lsm::detect_lsm_status,
+        core_governor::TrustedCore, hardening::detect_hardening_status, lsm::detect_lsm_status,
     },
 };
 use serenity::all::{Client, GatewayIntents};
@@ -217,12 +215,8 @@ async fn run_bot() -> Result<(), StartupError> {
     let sandbox_cfg = load_sandbox_config()?;
     let analyzer = WasmtimeSandboxAnalyzer::new(sandbox_cfg).map_err(StartupError::SandboxInit)?;
 
-    let mut core = TrustedCore::new_with_detector(
-        Box::new(analyzer),
-        detector,
-        bot_config,
-        runtime_cfg,
-    );
+    let mut core =
+        TrustedCore::new_with_detector(Box::new(analyzer), detector, bot_config, runtime_cfg);
 
     let (budget_total, budget_remaining, budget_reset_after) = load_session_budget()?;
     core.update_session_budget(budget_total, budget_remaining, budget_reset_after);
@@ -267,7 +261,9 @@ async fn run_bot() -> Result<(), StartupError> {
 
             let config_json = serde_json::to_string(&redacted_config)
                 .map_err(|err| StartupError::AuditCommand(err.to_string()))?;
-            if let Err(err) = store.record_config_snapshot(&startup.config_fingerprint, &config_json) {
+            if let Err(err) =
+                store.record_config_snapshot(&startup.config_fingerprint, &config_json)
+            {
                 warn!(error = %err, "failed to record config snapshot");
             }
 
@@ -346,11 +342,7 @@ fn run_audit_command(command: AuditCommands) -> Result<(), StartupError> {
     if let AuditCommands::Tui { limit } = command {
         let _ = run_operator_tui(
             OperatorTuiEntry::Audit,
-            OperatorTuiParams {
-                startup,
-                startup_created: false,
-                audit_limit: limit,
-            },
+            OperatorTuiParams { startup, startup_created: false, audit_limit: limit },
         )
         .map_err(StartupError::AuditCommand)?;
         return Ok(());
@@ -421,7 +413,10 @@ fn run_audit_command(command: AuditCommands) -> Result<(), StartupError> {
             };
             let stats = store.stats(&filter).map_err(StartupError::AuditCommand)?;
             println!("total={}", stats.total);
-            println!("by_event_type={}", serde_json::to_string(&stats.by_event_type).unwrap_or_default());
+            println!(
+                "by_event_type={}",
+                serde_json::to_string(&stats.by_event_type).unwrap_or_default()
+            );
             println!("by_backend={}", serde_json::to_string(&stats.by_backend).unwrap_or_default());
             println!(
                 "by_suppressed_reason={}",
@@ -440,13 +435,9 @@ fn run_audit_command(command: AuditCommands) -> Result<(), StartupError> {
                 }
             }
         }
-        AuditCommands::Verify {
-            start_event_id,
-            end_event_id,
-        } => {
-            let report = store
-                .verify(start_event_id, end_event_id)
-                .map_err(StartupError::AuditCommand)?;
+        AuditCommands::Verify { start_event_id, end_event_id } => {
+            let report =
+                store.verify(start_event_id, end_event_id).map_err(StartupError::AuditCommand)?;
             println!("checked_rows={}", report.checked_rows);
             println!("broken_rows={}", report.broken_rows);
             for detail in report.details {
@@ -473,9 +464,8 @@ fn run_audit_command(command: AuditCommands) -> Result<(), StartupError> {
                 mode,
                 limit: Some(limit),
             };
-            let count = store
-                .export(format.into(), &out, &filter)
-                .map_err(StartupError::AuditCommand)?;
+            let count =
+                store.export(format.into(), &out, &filter).map_err(StartupError::AuditCommand)?;
             println!("exported_rows={count}");
             println!("output={}", out.display());
         }
@@ -489,11 +479,7 @@ fn run_tui_command(page: TuiEntryArg) -> Result<(), StartupError> {
     let (startup, created) = prepare_startup_config_with_creation(false)?;
     let _ = run_operator_tui(
         page.into(),
-        OperatorTuiParams {
-            startup,
-            startup_created: created,
-            audit_limit: TUI_AUDIT_LIMIT,
-        },
+        OperatorTuiParams { startup, startup_created: created, audit_limit: TUI_AUDIT_LIMIT },
     )
     .map_err(StartupError::ConfigCommand)?;
     Ok(())
@@ -533,7 +519,9 @@ fn run_config_command(command: ConfigCommands) -> Result<(), StartupError> {
     Ok(())
 }
 
-fn prepare_startup_config(launch_tui_on_first_run: bool) -> Result<discord_oo_bot::config::LoadedStartupConfig, StartupError> {
+fn prepare_startup_config(
+    launch_tui_on_first_run: bool,
+) -> Result<discord_oo_bot::config::LoadedStartupConfig, StartupError> {
     prepare_startup_config_with_creation(launch_tui_on_first_run).map(|(startup, _)| startup)
 }
 
@@ -541,10 +529,13 @@ fn prepare_startup_config_with_creation(
     launch_tui_on_first_run: bool,
 ) -> Result<(discord_oo_bot::config::LoadedStartupConfig, bool), StartupError> {
     let path = startup_config_path();
-    let created = ensure_startup_config_exists(&path).map_err(StartupError::InvalidStartupConfig)?;
-    let mut startup = load_startup_config_from_path(&path).map_err(StartupError::InvalidStartupConfig)?;
+    let created =
+        ensure_startup_config_exists(&path).map_err(StartupError::InvalidStartupConfig)?;
+    let mut startup =
+        load_startup_config_from_path(&path).map_err(StartupError::InvalidStartupConfig)?;
 
-    if created && launch_tui_on_first_run && io::stdin().is_terminal() && io::stdout().is_terminal() {
+    if created && launch_tui_on_first_run && io::stdin().is_terminal() && io::stdout().is_terminal()
+    {
         let _ = run_operator_tui(
             OperatorTuiEntry::Setup,
             OperatorTuiParams {
@@ -554,7 +545,8 @@ fn prepare_startup_config_with_creation(
             },
         )
         .map_err(StartupError::ConfigCommand)?;
-        startup = load_startup_config_from_path(&path).map_err(StartupError::InvalidStartupConfig)?;
+        startup =
+            load_startup_config_from_path(&path).map_err(StartupError::InvalidStartupConfig)?;
     }
 
     Ok((startup, created))

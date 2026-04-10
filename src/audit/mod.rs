@@ -1,5 +1,5 @@
-use std::collections::BTreeMap;
 use std::cmp::Reverse;
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
@@ -226,7 +226,10 @@ enum AuditStoreMode {
 }
 
 impl AuditStore {
-    pub fn open_rw(cfg: &AuditStoreConfig, pseudo_id_hmac_key: Option<Vec<u8>>) -> Result<Self, String> {
+    pub fn open_rw(
+        cfg: &AuditStoreConfig,
+        pseudo_id_hmac_key: Option<Vec<u8>>,
+    ) -> Result<Self, String> {
         if let Some(parent) = cfg.sqlite_path.parent() {
             fs::create_dir_all(parent).map_err(|err| err.to_string())?;
         }
@@ -255,11 +258,8 @@ impl AuditStore {
     }
 
     pub fn open_ro(cfg: &AuditStoreConfig) -> Result<Self, String> {
-        let conn = Connection::open_with_flags(
-            &cfg.sqlite_path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .map_err(|err| err.to_string())?;
+        let conn = Connection::open_with_flags(&cfg.sqlite_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|err| err.to_string())?;
         apply_pragmas(&conn, cfg.busy_timeout_ms, true)?;
 
         Ok(Self {
@@ -453,10 +453,7 @@ impl AuditStore {
             *stats.by_event_type.entry(event.event_type).or_insert(0) += 1;
             *stats.by_backend.entry(event.detector_backend).or_insert(0) += 1;
             if !event.suppressed_reason.is_empty() {
-                *stats
-                    .by_suppressed_reason
-                    .entry(event.suppressed_reason)
-                    .or_insert(0) += 1;
+                *stats.by_suppressed_reason.entry(event.suppressed_reason).or_insert(0) += 1;
             }
             *stats.by_mode.entry(event.mode).or_insert(0) += 1;
         }
@@ -464,7 +461,11 @@ impl AuditStore {
         Ok(stats)
     }
 
-    pub fn verify(&self, start_event_id: Option<i64>, end_event_id: Option<i64>) -> Result<VerifyReport, String> {
+    pub fn verify(
+        &self,
+        start_event_id: Option<i64>,
+        end_event_id: Option<i64>,
+    ) -> Result<VerifyReport, String> {
         let mut statement = self
             .conn
             .prepare(
@@ -496,8 +497,7 @@ impl AuditStore {
                     .map_err(|err| err.to_string())?
                     .ok_or_else(|| {
                         format!(
-                            "failed to initialize verify chain: missing row_hash for event_id={}"
-                            ,
+                            "failed to initialize verify chain: missing row_hash for event_id={}",
                             start_id - 1
                         )
                     })?
@@ -527,11 +527,7 @@ impl AuditStore {
             expected_prev = row_hash;
         }
 
-        Ok(VerifyReport {
-            checked_rows: checked,
-            broken_rows: broken,
-            details,
-        })
+        Ok(VerifyReport { checked_rows: checked, broken_rows: broken, details })
     }
 
     pub fn export(
@@ -616,9 +612,8 @@ impl AuditStore {
             )
             .map_err(|err| err.to_string())?;
 
-        let mut rows = statement
-            .query(params![from_event, last_event_id])
-            .map_err(|err| err.to_string())?;
+        let mut rows =
+            statement.query(params![from_event, last_event_id]).map_err(|err| err.to_string())?;
 
         let mut concatenated = String::new();
         while let Some(row) = rows.next().map_err(|err| err.to_string())? {
@@ -646,18 +641,13 @@ impl AuditStore {
 
 fn apply_pragmas(conn: &Connection, busy_timeout_ms: u64, read_only: bool) -> Result<(), String> {
     if !read_only {
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|err| err.to_string())?;
-        conn.pragma_update(None, "wal_autocheckpoint", "10000")
-            .map_err(|err| err.to_string())?;
+        conn.pragma_update(None, "journal_mode", "WAL").map_err(|err| err.to_string())?;
+        conn.pragma_update(None, "wal_autocheckpoint", "10000").map_err(|err| err.to_string())?;
     }
-    conn.pragma_update(None, "foreign_keys", "ON")
-        .map_err(|err| err.to_string())?;
-    conn.pragma_update(None, "trusted_schema", "OFF")
-        .map_err(|err| err.to_string())?;
+    conn.pragma_update(None, "foreign_keys", "ON").map_err(|err| err.to_string())?;
+    conn.pragma_update(None, "trusted_schema", "OFF").map_err(|err| err.to_string())?;
     if read_only {
-        conn.pragma_update(None, "query_only", "ON")
-            .map_err(|err| err.to_string())?;
+        conn.pragma_update(None, "query_only", "ON").map_err(|err| err.to_string())?;
     }
     conn.busy_timeout(std::time::Duration::from_millis(busy_timeout_ms))
         .map_err(|err| err.to_string())?;
@@ -867,9 +857,7 @@ fn passes_filter(row: &AuditEventRow, filter: &AuditQueryFilter) -> bool {
 }
 
 fn now_utc_string() -> Result<String, String> {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .map_err(|err| err.to_string())
+    OffsetDateTime::now_utc().format(&Rfc3339).map_err(|err| err.to_string())
 }
 
 fn compute_row_hash(prev_hash: &str, normalized_payload_json: &str) -> String {
@@ -915,12 +903,12 @@ fn secure_create_output_file(path: &Path) -> Result<fs::File, String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        return fs::OpenOptions::new()
+        fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
             .open(path)
-            .map_err(|err| err.to_string());
+            .map_err(|err| err.to_string())
     }
 
     #[cfg(not(unix))]
@@ -971,11 +959,9 @@ fn export_parquet(path: &Path, rows: &[AuditEventRow]) -> Result<(), String> {
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let batch = RecordBatch::try_new(
-        schema.clone(),
-        vec![Arc::new(StringArray::from(json_values))],
-    )
-    .map_err(|err| err.to_string())?;
+    let batch =
+        RecordBatch::try_new(schema.clone(), vec![Arc::new(StringArray::from(json_values))])
+            .map_err(|err| err.to_string())?;
 
     let file = secure_create_output_file(path)?;
     let mut writer = ArrowWriter::try_new(file, schema, None).map_err(|err| err.to_string())?;
@@ -991,7 +977,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        AuditEventInput, AuditEventType, AuditQueryFilter, AuditStore, AuditStoreConfig, ExportFormat,
+        AuditEventInput, AuditEventType, AuditQueryFilter, AuditStore, AuditStoreConfig,
+        ExportFormat,
     };
 
     #[test]
@@ -1019,11 +1006,8 @@ mod tests {
         drop(store);
 
         let conn = Connection::open(&db_path).expect("open sqlite");
-        conn.execute(
-            "UPDATE audit_events SET selected_action='tampered' WHERE event_id=1",
-            [],
-        )
-        .expect_err("append-only update should fail");
+        conn.execute("UPDATE audit_events SET selected_action='tampered' WHERE event_id=1", [])
+            .expect_err("append-only update should fail");
 
         drop(conn);
 

@@ -121,10 +121,7 @@ pub fn load_replay_cases(path: &Path) -> Result<Vec<ReplayCase>, ReplayError> {
     Err(ReplayError::ReadFixture(format!("path not found: {}", path.display())))
 }
 
-pub fn run_replay_case(
-    case: &ReplayCase,
-    config: &BotConfig,
-) -> Result<(), String> {
+pub fn run_replay_case(case: &ReplayCase, config: &BotConfig) -> Result<(), String> {
     let actual = analyze_message(&case.content, case.author_is_bot, config);
     let expected = case.expected.clone();
     let actual_as_expected: ExpectedAction = actual.into();
@@ -219,11 +216,7 @@ pub fn build_replay_core(config: BotConfig) -> Result<TrustedCore, String> {
         ..RuntimeProtectionConfig::default()
     };
 
-    Ok(TrustedCore::new(
-        Box::new(ReplayHarnessAnalyzer { inner: analyzer }),
-        config,
-        runtime_cfg,
-    ))
+    Ok(TrustedCore::new(Box::new(ReplayHarnessAnalyzer { inner: analyzer }), config, runtime_cfg))
 }
 
 fn load_replay_cases_from_file(path: &Path) -> Result<Vec<ReplayCase>, ReplayError> {

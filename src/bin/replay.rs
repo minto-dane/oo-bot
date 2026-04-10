@@ -2,11 +2,9 @@
 
 use std::{path::PathBuf, process::ExitCode};
 
-use discord_oo_bot::{
-    app::{
-        analyze_message::BotConfig,
-        replay::{build_replay_core, load_replay_cases, run_replay_case_with_core},
-    },
+use discord_oo_bot::app::{
+    analyze_message::BotConfig,
+    replay::{build_replay_core, load_replay_cases, run_replay_case_with_core},
 };
 
 fn main() -> ExitCode {

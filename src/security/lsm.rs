@@ -78,18 +78,14 @@ fn detect_apparmor(status: &mut LsmStatus) {
                 status.apparmor_profile = Some(current);
             }
         }
-        Err(err) => status
-            .warnings
-            .push(format!("failed to read AppArmor current profile: {err}")),
+        Err(err) => status.warnings.push(format!("failed to read AppArmor current profile: {err}")),
     }
 
     match std::fs::read_to_string("/sys/module/apparmor/parameters/enabled") {
         Ok(raw) => {
             status.apparmor_enabled = Some(raw.trim() == "Y");
         }
-        Err(err) => status
-            .warnings
-            .push(format!("failed to read AppArmor module enabled status: {err}")),
+        Err(err) => status.warnings.push(format!("failed to read AppArmor module enabled status: {err}")),
     }
 }
 
@@ -128,9 +124,7 @@ fn detect_selinux(status: &mut LsmStatus) {
         Ok(raw) => {
             status.selinux_enforce = Some(raw.trim() == "1");
         }
-        Err(err) => status
-            .warnings
-            .push(format!("failed to read SELinux enforce status: {err}")),
+        Err(err) => status.warnings.push(format!("failed to read SELinux enforce status: {err}")),
     }
 }
 
@@ -138,13 +132,9 @@ fn detect_yama(status: &mut LsmStatus) {
     match std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope") {
         Ok(raw) => match raw.trim().parse::<i32>() {
             Ok(value) => status.yama_ptrace_scope = Some(value),
-            Err(err) => status
-                .warnings
-                .push(format!("failed to parse yama ptrace scope: {err}")),
+            Err(err) => status.warnings.push(format!("failed to parse yama ptrace scope: {err}")),
         },
-        Err(err) => status
-            .warnings
-            .push(format!("failed to read yama ptrace scope: {err}")),
+        Err(err) => status.warnings.push(format!("failed to read yama ptrace scope: {err}")),
     }
 }
 
