@@ -22,6 +22,9 @@ Nix は後者向けの任意手段です。Bot を動かすだけなら必須で
   - replay CLI は state reset / `preserve_state` / sandbox trap/timeout injection を含めて test harness と同じ挙動を取る
 - bot run
   - `cargo run --bin oo-bot -- run`
+- runtime control
+  - `cargo run --bin oo-bot -- control status`
+  - `cargo run --bin oo-bot -- control stop`
 - dashboard / operator tui
   - `cargo run --bin oo-bot -- tui`
   - `cargo run --bin oo-bot -- tui --page setup|dashboard|diagnostics|audit`
@@ -54,6 +57,9 @@ Nix は後者向けの任意手段です。Bot を動かすだけなら必須で
   - `cargo run --bin oo-bot -- config init`
   - `cargo run --bin oo-bot -- config setup`
   - `cargo run --bin oo-bot -- tui --page setup`
+6. 実行中 bot の状態確認 / 停止:
+  - `cargo run --bin oo-bot -- control status`
+  - `cargo run --bin oo-bot -- control stop`
 
 ## just
 

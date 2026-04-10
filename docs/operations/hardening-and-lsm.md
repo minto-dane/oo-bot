@@ -55,6 +55,7 @@
 ## AppArmor
 
 - policy: `deploy/apparmor/oo-bot.apparmor`
+- runtime control socket (`/run/oo-bot/control.sock`) を許可済み
 - 例:
 
 ```bash
@@ -65,11 +66,24 @@ sudo apparmor_parser -r /etc/apparmor.d/oo-bot
 ## SELinux
 
 - policy source: `deploy/selinux/oo_bot.te`
+- file context: `deploy/selinux/oo_bot.fc`
 - installer: `deploy/selinux/install_selinux_policy.sh`
 
 ```bash
 sudo ./deploy/selinux/install_selinux_policy.sh
 ```
+
+installer は次を実施します。
+
+- `checkmodule -> semodule_package(-f oo_bot.fc) -> semodule -i`
+- `/opt/oo-bot/oo-bot`, `/etc/oo-bot`, `/var/lib/oo-bot`, `/run/oo-bot` への `restorecon`
+
+期待する主要ラベル:
+
+- `/opt/oo-bot/oo-bot` -> `oo_bot_exec_t`
+- `/etc/oo-bot(/.*)?` -> `oo_bot_etc_t`
+- `/var/lib/oo-bot(/.*)?` -> `oo_bot_var_lib_t`
+- `/run/oo-bot(/.*)?` -> `oo_bot_var_run_t`
 
 ## systemd hardened unit
 

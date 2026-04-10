@@ -3,6 +3,7 @@
 use std::io::{self, IsTerminal};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use discord_oo_bot::{
@@ -13,6 +14,10 @@ use discord_oo_bot::{
     config::{
         ensure_startup_config_exists, load_startup_config_from_path, startup_config_path,
         write_startup_config_to_path, StartupConfig, StartupConfigError,
+    },
+    control::{
+        bind_runtime_control_listener, control_socket_path, request_runtime_status,
+        request_runtime_stop, serve_runtime_control, RuntimeControlCommand, RuntimeControlStatus,
     },
     domain::detector::build_detector,
     infra::discord_handler::{Handler, HandlerRuntimeMeta},
@@ -47,6 +52,8 @@ enum StartupError {
     AuditCommand(String),
     #[error("config command failed: {0}")]
     ConfigCommand(String),
+    #[error("control command failed: {0}")]
+    ControlCommand(String),
 }
 
 #[derive(Debug, Parser)]
@@ -68,6 +75,10 @@ enum Commands {
         #[command(subcommand)]
         command: ConfigCommands,
     },
+    Control {
+        #[command(subcommand)]
+        command: ControlCommands,
+    },
     Audit {
         #[command(subcommand)]
         command: AuditCommands,
@@ -82,6 +93,12 @@ enum ConfigCommands {
     },
     Setup,
     Edit,
+}
+
+#[derive(Debug, Subcommand)]
+enum ControlCommands {
+    Status,
+    Stop,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -197,6 +214,7 @@ async fn main() -> Result<(), StartupError> {
         Commands::Run => run_bot().await,
         Commands::Tui { page } => run_tui_command(page),
         Commands::Config { command } => run_config_command(command),
+        Commands::Control { command } => run_control_command(command).await,
         Commands::Audit { command } => run_audit_command(command),
     }
 }
@@ -305,16 +323,59 @@ async fn run_bot() -> Result<(), StartupError> {
             runtime_meta: HandlerRuntimeMeta {
                 binary_version: env!("CARGO_PKG_VERSION").to_string(),
                 config_fingerprint: startup.config_fingerprint.clone(),
-                active_lsm,
-                hardening_status: hardening_summary,
+                active_lsm: active_lsm.clone(),
+                hardening_status: hardening_summary.clone(),
             },
         })
         .await
         .map_err(|err| StartupError::ClientBuild(err.to_string()))?;
 
-    info!("starting bot");
+    let control_socket = control_socket_path(&startup.config_path);
+    let control_listener =
+        bind_runtime_control_listener(&control_socket).map_err(StartupError::ControlCommand)?;
+    let control_status = RuntimeControlStatus {
+        state: "running".to_string(),
+        pid: std::process::id(),
+        started_at_unix: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+        config_path: startup.config_path.display().to_string(),
+        config_fingerprint: startup.config_fingerprint.clone(),
+        detector_backend: format!("{:?}", startup.app.detector.backend),
+        active_lsm: active_lsm.clone(),
+        hardening_status: hardening_summary.clone(),
+        socket_path: control_socket.display().to_string(),
+    };
+    let (control_command_tx, mut control_command_rx) = tokio::sync::mpsc::channel(8);
+    let (control_shutdown_tx, control_shutdown_rx) = tokio::sync::watch::channel(false);
+    let control_server = tokio::spawn(serve_runtime_control(
+        control_listener,
+        control_socket.clone(),
+        control_status.clone(),
+        control_shutdown_rx,
+        control_command_tx.clone(),
+    ));
+    let signal_supervisor = tokio::spawn(run_signal_supervisor(control_command_tx.clone()));
+    let shard_manager = client.shard_manager.clone();
+    let shutdown_supervisor = tokio::spawn(async move {
+        if let Some(RuntimeControlCommand::Stop { source }) = control_command_rx.recv().await {
+            info!(source = %source, "runtime stop requested");
+            shard_manager.shutdown_all().await;
+        }
+    });
+
+    info!(control_socket = %control_socket.display(), "starting bot");
     if let Err(err) = client.start().await {
         error!(error = %err, "discord client stopped with error");
+    }
+
+    let _ = control_shutdown_tx.send(true);
+    signal_supervisor.abort();
+    let _ = signal_supervisor.await;
+    drop(control_command_tx);
+    let _ = shutdown_supervisor.await;
+    match control_server.await {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => warn!(error = %err, "runtime control server exited with error"),
+        Err(err) => warn!(error = %err, "runtime control server join error"),
     }
 
     if let Some(store) = audit_store {
@@ -330,6 +391,32 @@ async fn run_bot() -> Result<(), StartupError> {
         };
         if let Err(err) = guard.record_event(&event) {
             warn!(error = %err, "failed to record process_shutdown audit event");
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_control_command(command: ControlCommands) -> Result<(), StartupError> {
+    let path = startup_config_path();
+
+    match command {
+        ControlCommands::Status => {
+            let status = request_runtime_status(&path).map_err(StartupError::ControlCommand)?;
+            println!("state={}", status.state);
+            println!("pid={}", status.pid);
+            println!("started_at_unix={}", status.started_at_unix);
+            println!("config_path={}", status.config_path);
+            println!("config_fingerprint={}", status.config_fingerprint);
+            println!("detector_backend={}", status.detector_backend);
+            println!("active_lsm={}", status.active_lsm);
+            println!("hardening_status={}", status.hardening_status);
+            println!("socket_path={}", status.socket_path);
+        }
+        ControlCommands::Stop => {
+            let message =
+                request_runtime_stop(&path, "cli").map_err(StartupError::ControlCommand)?;
+            println!("{message}");
         }
     }
 
@@ -575,6 +662,46 @@ fn init_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     fmt().with_env_filter(filter).compact().init();
 }
+
+#[cfg(unix)]
+async fn run_signal_supervisor(command_tx: tokio::sync::mpsc::Sender<RuntimeControlCommand>) {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let mut sigint = match signal(SignalKind::interrupt()) {
+        Ok(stream) => stream,
+        Err(err) => {
+            warn!(error = %err, "failed to install SIGINT supervisor");
+            return;
+        }
+    };
+    let mut sigterm = match signal(SignalKind::terminate()) {
+        Ok(stream) => stream,
+        Err(err) => {
+            warn!(error = %err, "failed to install SIGTERM supervisor");
+            return;
+        }
+    };
+
+    loop {
+        tokio::select! {
+            _ = sigint.recv() => {
+                warn!("SIGINT received; use `oo-bot control stop` or the operator TUI stop action to shut down");
+            }
+            _ = sigterm.recv() => {
+                warn!("SIGTERM received; forwarding graceful stop request");
+                let _ = command_tx
+                    .send(RuntimeControlCommand::Stop {
+                        source: "signal:SIGTERM".to_string(),
+                    })
+                    .await;
+                break;
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+async fn run_signal_supervisor(_command_tx: tokio::sync::mpsc::Sender<RuntimeControlCommand>) {}
 
 fn validate_discord_token(token: &str) -> Result<(), StartupError> {
     if token.trim().is_empty() || !token.contains('.') || token.len() < 50 {

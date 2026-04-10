@@ -9,6 +9,8 @@ serenity を使った Rust 製 Discord Bot です。
 
 - 全体索引: [docs/index.md](docs/index.md)
 - docs ポータル: [docs/README.md](docs/README.md)
+- TUI リファレンス: [docs/reference/tui-reference.md](docs/reference/tui-reference.md)
+- 稼働 / 停止 / systemd: [docs/operations/service-control.md](docs/operations/service-control.md)
 
 ## 仕様
 
@@ -152,6 +154,16 @@ export OO_CONFIG_PATH=config/oo-bot.local.yaml
 cargo run --bin oo-bot -- run
 ```
 
+4. 別シェルから状態確認 / TUI / 停止
+
+```bash
+cargo run --bin oo-bot -- control status
+cargo run --bin oo-bot -- tui
+cargo run --bin oo-bot -- control stop
+```
+
+`tui` は bot 本体とは別プロセスです。TUI を終了しても bot は継続します。
+
 ### audit CLI / TUI
 
 ```bash
@@ -164,6 +176,15 @@ cargo run --bin oo-bot -- audit verify
 cargo run --bin oo-bot -- audit export --format jsonl --out /tmp/audit.jsonl
 cargo run --bin oo-bot -- audit tui
 ```
+
+### runtime control
+
+```bash
+cargo run --bin oo-bot -- control status
+cargo run --bin oo-bot -- control stop
+```
+
+`Ctrl+C` は operator TUI を閉じるためには使えますが、bot 本体の停止には `control stop` または systemd stop を使う前提です。
 
 ### hardening build 検証
 

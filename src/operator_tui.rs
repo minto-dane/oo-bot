@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::SystemTime;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
@@ -9,7 +10,9 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 
@@ -20,6 +23,9 @@ use crate::config::{
     canonical_startup_config, validate_startup_config, write_startup_config_to_path,
     ConfigSignatureConfig, LoadedStartupConfig, StartupConfig, CONFIG_SCHEMA_VERSION,
 };
+use crate::control::{
+    control_socket_path, request_runtime_status, request_runtime_stop, RuntimeControlStatus,
+};
 use crate::security::diagnostics::{run_local_self_check, CheckStatus, LocalSelfCheckReport};
 use crate::security::hardening::{detect_hardening_status, HardeningStatus};
 use crate::security::lsm::{detect_lsm_status, LsmStatus};
@@ -27,6 +33,7 @@ use crate::security::lsm::{detect_lsm_status, LsmStatus};
 const TUI_AUDIT_CAP: usize = 250;
 const MAX_INPUT_BUFFER_LEN: usize = 4096;
 const MAX_AUDIT_SEARCH_LEN: usize = 256;
+const OPERATOR_TUI_I18N_YAML: &str = include_str!("../config/i18n/operator_tui.yaml");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperatorTuiEntry {
@@ -50,10 +57,17 @@ pub struct OperatorTuiResult {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
+    Welcome,
     Dashboard,
     Setup,
     Diagnostics,
     Audit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiLanguage {
+    English,
+    Japanese,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,19 +154,37 @@ struct DiagnosticsSummary {
 }
 
 #[derive(Debug, Clone)]
+struct BotControlState {
+    socket_path: PathBuf,
+    runtime: Option<RuntimeControlStatus>,
+    status: String,
+    stop_armed: bool,
+}
+
+#[derive(Debug, Clone)]
 struct OperatorTuiApp {
     startup: LoadedStartupConfig,
     startup_created: bool,
     saved_config: bool,
+    audit_limit: usize,
+    language: UiLanguage,
     screen: Screen,
+    landing_screen: Screen,
     input_mode: InputMode,
     input_buffer: String,
     status: String,
     lsm_status: LsmStatus,
     hardening_status: HardeningStatus,
     diagnostics: DiagnosticsSummary,
+    control: BotControlState,
     setup: SetupState,
     audit: AuditState,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct UiCatalog {
+    en: BTreeMap<String, String>,
+    ja: BTreeMap<String, String>,
 }
 
 const DETECTOR_FIELDS: &[SetupField] = &[
@@ -197,6 +229,7 @@ pub fn run_operator_tui(
     entry: OperatorTuiEntry,
     params: OperatorTuiParams,
 ) -> Result<OperatorTuiResult, String> {
+    let language = detect_ui_language();
     let lsm_status = detect_lsm_status();
     let hardening_status = detect_hardening_status();
     let local_self_check = run_local_self_check(&params.startup);
@@ -205,29 +238,31 @@ pub fn run_operator_tui(
         &local_self_check,
         &lsm_status,
         &hardening_status,
+        language,
     );
-    let audit = load_audit_state(&params.startup, params.audit_limit);
+    let control = load_control_state(&params.startup, language);
+    let audit = load_audit_state(&params.startup, params.audit_limit, language);
+    let landing_screen = match entry {
+        OperatorTuiEntry::Dashboard => Screen::Dashboard,
+        OperatorTuiEntry::Setup => Screen::Setup,
+        OperatorTuiEntry::Diagnostics => Screen::Diagnostics,
+        OperatorTuiEntry::Audit => Screen::Audit,
+    };
 
     let mut app = OperatorTuiApp {
-        status: if params.startup_created {
-            "new config created from yaml defaults. open setup to review before first run"
-                .to_string()
-        } else {
-            "1:dashboard 2:setup 3:diagnostics 4:audit   q:quit".to_string()
-        },
+        status: default_status_message(params.startup_created, language),
         startup_created: params.startup_created,
         saved_config: false,
-        screen: match entry {
-            OperatorTuiEntry::Dashboard => Screen::Dashboard,
-            OperatorTuiEntry::Setup => Screen::Setup,
-            OperatorTuiEntry::Diagnostics => Screen::Diagnostics,
-            OperatorTuiEntry::Audit => Screen::Audit,
-        },
+        audit_limit: params.audit_limit,
+        language,
+        screen: Screen::Welcome,
+        landing_screen,
         input_mode: InputMode::Normal,
         input_buffer: String::new(),
         lsm_status,
         hardening_status,
         diagnostics,
+        control,
         setup: SetupState {
             draft: params.startup.app.clone(),
             defaults: canonical_startup_config(),
@@ -292,23 +327,34 @@ fn render_app(frame: &mut Frame<'_>, app: &OperatorTuiApp) {
         .constraints([Constraint::Length(3), Constraint::Min(12), Constraint::Length(3)])
         .split(frame.area());
 
-    let header = Paragraph::new(format!(
-        "oo-bot operator tui   active={}   config={}   fingerprint={}   screen={}",
-        app.lsm_status.active_lsm_summary(),
-        app.startup.config_path.display(),
-        truncate_middle(&app.startup.config_fingerprint, 18),
-        match app.screen {
-            Screen::Dashboard => "dashboard",
-            Screen::Setup => "setup",
-            Screen::Diagnostics => "diagnostics",
-            Screen::Audit => "audit",
-        }
-    ))
-    .block(Block::default().title("Status").borders(Borders::ALL))
+    let header = Paragraph::new(vec![Line::from(vec![
+        Span::styled(
+            format!("{}   ", label(app.language, "common.app_title", "common.app_title")),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(format!(
+            "{}={}   {}={}   {}={}   {}={}",
+            label(app.language, "common.active", "common.active"),
+            app.lsm_status.active_lsm_summary(),
+            label(app.language, "common.config", "common.config"),
+            app.startup.config_path.display(),
+            label(app.language, "common.fingerprint", "common.fingerprint"),
+            truncate_middle(&app.startup.config_fingerprint, 18),
+            label(app.language, "common.screen", "common.screen"),
+            screen_name(app.language, app.screen),
+        )),
+    ])])
+    .block(
+        Block::default()
+            .title(label(app.language, "common.status_title", "common.status_title"))
+            .borders(Borders::ALL)
+            .border_style(overall_health_style(app)),
+    )
     .wrap(Wrap { trim: true });
     frame.render_widget(header, layout[0]);
 
     match app.screen {
+        Screen::Welcome => render_welcome(frame, layout[1], app),
         Screen::Dashboard => render_dashboard(frame, layout[1], app),
         Screen::Setup => render_setup(frame, layout[1], app),
         Screen::Diagnostics => render_diagnostics(frame, layout[1], app),
@@ -318,20 +364,98 @@ fn render_app(frame: &mut Frame<'_>, app: &OperatorTuiApp) {
     let footer_text = match app.input_mode {
         InputMode::Normal => app.status.clone(),
         InputMode::SetupEdit(field) => {
-            let default = setup_default_value(&app.setup.defaults, field);
-            format!(
-                "editing {}   enter=commit custom value   esc=cancel   blank enter => default ({default})",
-                setup_field_label(field)
-            )
+            let default = setup_default_value(app.language, &app.setup.defaults, field);
+            match app.language {
+                UiLanguage::English | UiLanguage::Japanese => template(
+                    app.language,
+                    "status.setup_edit",
+                    &[("field", setup_field_label(field)), ("default", &default)],
+                ),
+            }
         }
         InputMode::AuditSearch => {
-            "audit search: type to filter, enter=apply, esc=cancel".to_string()
+            label(app.language, "status.audit_search_help", "status.audit_search_help").to_string()
         }
     };
     let footer = Paragraph::new(footer_text)
-        .block(Block::default().title("Help").borders(Borders::ALL))
+        .block(
+            Block::default()
+                .title(label(app.language, "common.help_title", "common.help_title"))
+                .borders(Borders::ALL)
+                .border_style(status_style_from_text(&app.status)),
+        )
         .wrap(Wrap { trim: true });
     frame.render_widget(footer, layout[2]);
+}
+
+fn render_welcome(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &OperatorTuiApp) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(10), Constraint::Min(8), Constraint::Length(5)])
+        .split(area);
+
+    let banner = Paragraph::new(vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            label(app.language, "welcome.banner_line_1", "welcome.banner_line_1"),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            label(app.language, "welcome.banner_line_2", "welcome.banner_line_2"),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(label(app.language, "welcome.subtitle", "welcome.subtitle")),
+    ])
+    .alignment(Alignment::Center)
+    .block(
+        Block::default()
+            .title(label(app.language, "welcome.title", "welcome.title"))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan)),
+    )
+    .wrap(Wrap { trim: true });
+    frame.render_widget(banner, chunks[0]);
+
+    let language_lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::raw(label(app.language, "welcome.language_prompt", "welcome.language_prompt")),
+            language_chip(UiLanguage::English, app.language == UiLanguage::English),
+            Span::raw("   "),
+            language_chip(UiLanguage::Japanese, app.language == UiLanguage::Japanese),
+        ]),
+        Line::from(""),
+        Line::from(label(app.language, "welcome.language_help", "welcome.language_help")),
+        Line::from(template(
+            app.language,
+            "welcome.continue_prompt",
+            &[("screen", screen_name(app.language, app.landing_screen))],
+        )),
+    ];
+    let chooser = Paragraph::new(language_lines)
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .title(label(app.language, "common.language_title", "common.language_title"))
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Magenta)),
+        )
+        .wrap(Wrap { trim: true });
+    frame.render_widget(chooser, chunks[1]);
+
+    let status = Paragraph::new(
+        label(app.language, "welcome.quick_keys_help", "welcome.quick_keys_help").to_string(),
+    )
+    .alignment(Alignment::Center)
+    .block(
+        Block::default()
+            .title(label(app.language, "common.quick_keys_title", "common.quick_keys_title"))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green)),
+    )
+    .wrap(Wrap { trim: true });
+    frame.render_widget(status, chunks[2]);
 }
 
 fn render_dashboard(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &OperatorTuiApp) {
@@ -351,40 +475,158 @@ fn render_dashboard(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Op
             .split(area)
     };
 
-    let system = Paragraph::new(format!(
-        "config schema: {}\naudit schema: {}\nconfig fingerprint: {}\ndetector backend: {:?}\nactive LSM: {}\nconfinement: {}\nhardening: {}\nstartup mode: {}",
-        CONFIG_SCHEMA_VERSION,
-        SCHEMA_VERSION,
-        app.startup.config_fingerprint,
-        app.startup.app.detector.backend,
-        app.lsm_status.active_lsm_summary(),
-        app.diagnostics.confinement_state,
-        app.hardening_status.summary(),
-        if app.startup_created { "fresh bootstrap" } else { "existing config" },
-    ))
-    .block(Block::default().title("Dashboard").borders(Borders::ALL))
+    let system = Paragraph::new(vec![
+        line_kv(
+            app.language,
+            "common.config_schema",
+            CONFIG_SCHEMA_VERSION.to_string(),
+            Style::default(),
+        ),
+        line_kv(app.language, "common.audit_schema", SCHEMA_VERSION.to_string(), Style::default()),
+        line_kv(
+            app.language,
+            "common.config_fingerprint",
+            app.startup.config_fingerprint.clone(),
+            Style::default(),
+        ),
+        line_kv(
+            app.language,
+            "common.detector_backend",
+            format!("{:?}", app.startup.app.detector.backend),
+            Style::default().fg(Color::Cyan),
+        ),
+        line_kv(
+            app.language,
+            "common.active_lsm",
+            app.lsm_status.active_lsm_summary(),
+            lsm_style(&app.lsm_status),
+        ),
+        line_kv(
+            app.language,
+            "common.confinement",
+            app.diagnostics.confinement_state.clone(),
+            overall_health_style(app),
+        ),
+        line_kv(
+            app.language,
+            "common.hardening",
+            app.hardening_status.summary(),
+            hardening_style(&app.hardening_status),
+        ),
+        line_kv(
+            app.language,
+            "common.startup_mode",
+            if app.startup_created {
+                label(app.language, "dashboard.fresh_bootstrap", "dashboard.fresh_bootstrap")
+                    .to_string()
+            } else {
+                label(app.language, "dashboard.existing_config", "dashboard.existing_config")
+                    .to_string()
+            },
+            Style::default(),
+        ),
+        line_kv(
+            app.language,
+            "common.bot_runtime",
+            runtime_state_label(app.language, &app.control),
+            control_state_style(&app.control),
+        ),
+        line_kv(
+            app.language,
+            "common.runtime_pid",
+            runtime_pid_label(app.language, &app.control),
+            control_state_style(&app.control),
+        ),
+    ])
+    .block(
+        Block::default()
+            .title(label(app.language, "dashboard.title", "dashboard.title"))
+            .borders(Borders::ALL)
+            .border_style(overall_health_style(app)),
+    )
     .wrap(Wrap { trim: true });
     frame.render_widget(system, chunks[0]);
 
-    let diagnostics = Paragraph::new(format!(
-        "local self-check: {}\naudit db health: {}\nintegrity verify: {}\ndependency snapshot: {}\nexport-safe policy: {}\nstartup config: {}\n",
-        check_status_label(app.diagnostics.local_self_check.healthy),
-        app.diagnostics.audit_db_health,
-        app.diagnostics.integrity_verify_result,
-        app.diagnostics.dependency_snapshot_status,
-        app.diagnostics.export_safe_policy_status,
-        app.startup.config_path.display(),
-    ))
-    .block(Block::default().title("Health").borders(Borders::ALL))
+    let diagnostics = Paragraph::new(vec![
+        line_kv(
+            app.language,
+            "common.local_self_check",
+            check_status_label(app.language, app.diagnostics.local_self_check.healthy).to_string(),
+            if app.diagnostics.local_self_check.healthy {
+                success_style()
+            } else {
+                warning_style()
+            },
+        ),
+        line_kv(
+            app.language,
+            "common.audit_db_health",
+            app.diagnostics.audit_db_health.clone(),
+            status_style_from_text(&app.diagnostics.audit_db_health),
+        ),
+        line_kv(
+            app.language,
+            "common.integrity_verify",
+            app.diagnostics.integrity_verify_result.clone(),
+            status_style_from_text(&app.diagnostics.integrity_verify_result),
+        ),
+        line_kv(
+            app.language,
+            "common.dependency_snapshot",
+            app.diagnostics.dependency_snapshot_status.clone(),
+            status_style_from_text(&app.diagnostics.dependency_snapshot_status),
+        ),
+        line_kv(
+            app.language,
+            "common.export_safe_policy",
+            app.diagnostics.export_safe_policy_status.clone(),
+            Style::default().fg(Color::Blue),
+        ),
+        line_kv(
+            app.language,
+            "common.startup_config",
+            app.startup.config_path.display().to_string(),
+            Style::default(),
+        ),
+        line_kv(
+            app.language,
+            "common.control_socket",
+            truncate_middle(&app.control.socket_path.display().to_string(), 40),
+            control_state_style(&app.control),
+        ),
+        line_kv(
+            app.language,
+            "common.control_status",
+            app.control.status.clone(),
+            status_style_from_text(&app.control.status),
+        ),
+    ])
+    .block(
+        Block::default()
+            .title(label(app.language, "dashboard.health_title", "dashboard.health_title"))
+            .borders(Borders::ALL)
+            .border_style(overall_health_style(app)),
+    )
     .wrap(Wrap { trim: true });
     frame.render_widget(diagnostics, chunks[1]);
 
     let recommendations = Paragraph::new(format!(
-        "writable paths:\n{}\n\nrecommendations:\n{}",
+        "{}:\n{}\n\n{}:\n{}",
+        label(app.language, "common.writable_paths", "common.writable_paths"),
         app.diagnostics.writable_paths.join("\n"),
+        label(app.language, "common.recommendations", "common.recommendations"),
         app.diagnostics.recommendations.join("\n")
     ))
-    .block(Block::default().title("Runtime Env").borders(Borders::ALL))
+    .block(
+        Block::default()
+            .title(label(
+                app.language,
+                "dashboard.runtime_env_title",
+                "dashboard.runtime_env_title",
+            ))
+            .borders(Borders::ALL)
+            .border_style(lsm_style(&app.lsm_status)),
+    )
     .wrap(Wrap { trim: true });
     frame.render_widget(recommendations, chunks[2]);
 }
@@ -396,32 +638,65 @@ fn render_setup(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Operat
         .split(area);
 
     let page_title = Paragraph::new(format!(
-        "page={}   left/right=change page   up/down=select   enter=apply default   e=edit custom   space=cycle   p=preview   s=save on preview",
-        setup_page_name(app.setup.page)
+        "{}={}   {}   {}   {}   {}   {}   {}   {}",
+        label(app.language, "common.page", "common.page"),
+        setup_page_name(app.language, app.setup.page),
+        label(app.language, "setup.control.change_page", "setup.control.change_page"),
+        label(app.language, "setup.control.select", "setup.control.select"),
+        label(app.language, "setup.control.default", "setup.control.default"),
+        label(app.language, "setup.control.edit", "setup.control.edit"),
+        label(app.language, "setup.control.cycle", "setup.control.cycle"),
+        label(app.language, "setup.control.preview", "setup.control.preview"),
+        label(app.language, "setup.control.save", "setup.control.save"),
     ))
-    .block(Block::default().title("Setup Wizard").borders(Borders::ALL))
+    .block(
+        Block::default()
+            .title(label(app.language, "setup.title", "setup.title"))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Blue)),
+    )
     .wrap(Wrap { trim: true });
     frame.render_widget(page_title, chunks[0]);
 
     if app.setup.page == SetupPage::Preview {
         let preview = Paragraph::new(build_setup_preview(app))
-            .block(Block::default().title("Preview").borders(Borders::ALL))
+            .block(
+                Block::default()
+                    .title(label(app.language, "setup.preview_title", "setup.preview_title"))
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Cyan)),
+            )
             .wrap(Wrap { trim: false });
         frame.render_widget(preview, chunks[1]);
     } else if app.setup.page == SetupPage::Runtime {
         let runtime = Paragraph::new(build_runtime_environment_block(app))
-            .block(Block::default().title("Runtime Environment").borders(Borders::ALL))
+            .block(
+                Block::default()
+                    .title(label(app.language, "setup.runtime_title", "setup.runtime_title"))
+                    .borders(Borders::ALL)
+                    .border_style(lsm_style(&app.lsm_status)),
+            )
             .wrap(Wrap { trim: true });
         frame.render_widget(runtime, chunks[1]);
     } else {
         let body = Paragraph::new(build_setup_field_block(app))
-            .block(Block::default().title("Fields").borders(Borders::ALL))
+            .block(
+                Block::default()
+                    .title(label(app.language, "setup.fields_title", "setup.fields_title"))
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Blue)),
+            )
             .wrap(Wrap { trim: false });
         frame.render_widget(body, chunks[1]);
     }
 
-    let validation = Paragraph::new(build_setup_validation_block(app))
-        .block(Block::default().title("Validation").borders(Borders::ALL))
+    let validation = Paragraph::new(build_setup_validation_lines(app))
+        .block(
+            Block::default()
+                .title(label(app.language, "setup.validation_title", "setup.validation_title"))
+                .borders(Borders::ALL)
+                .border_style(validation_border_style(app)),
+        )
         .wrap(Wrap { trim: true });
     frame.render_widget(validation, chunks[2]);
 }
@@ -439,20 +714,74 @@ fn render_diagnostics(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &
             .split(area)
     };
 
-    let summary = Paragraph::new(format!(
-        "active LSM: {}\ncurrent confinement: {}\nhardening status: {}\nconfig fingerprint: {}\ndetector backend: {:?}\naudit DB health: {}\nschema version: {}\nintegrity verify result: {}\nexport-safe policy: {}\ndependency audit snapshot: {}",
-        app.lsm_status.active_lsm_summary(),
-        app.diagnostics.confinement_state,
-        app.hardening_status.summary(),
-        app.startup.config_fingerprint,
-        app.startup.app.detector.backend,
-        app.diagnostics.audit_db_health,
-        CONFIG_SCHEMA_VERSION,
-        app.diagnostics.integrity_verify_result,
-        app.diagnostics.export_safe_policy_status,
-        app.diagnostics.dependency_snapshot_status,
-    ))
-    .block(Block::default().title("Diagnostics Summary").borders(Borders::ALL))
+    let summary = Paragraph::new(vec![
+        line_kv(
+            app.language,
+            "common.active_lsm",
+            app.lsm_status.active_lsm_summary(),
+            lsm_style(&app.lsm_status),
+        ),
+        line_kv(
+            app.language,
+            "common.current_confinement",
+            app.diagnostics.confinement_state.clone(),
+            overall_health_style(app),
+        ),
+        line_kv(
+            app.language,
+            "common.hardening_status",
+            app.hardening_status.summary(),
+            hardening_style(&app.hardening_status),
+        ),
+        line_kv(
+            app.language,
+            "common.config_fingerprint",
+            app.startup.config_fingerprint.clone(),
+            Style::default(),
+        ),
+        line_kv(
+            app.language,
+            "common.detector_backend",
+            format!("{:?}", app.startup.app.detector.backend),
+            Style::default().fg(Color::Cyan),
+        ),
+        line_kv(
+            app.language,
+            "common.audit_db_health",
+            app.diagnostics.audit_db_health.clone(),
+            status_style_from_text(&app.diagnostics.audit_db_health),
+        ),
+        line_kv(
+            app.language,
+            "common.schema_version",
+            CONFIG_SCHEMA_VERSION.to_string(),
+            Style::default(),
+        ),
+        line_kv(
+            app.language,
+            "common.integrity_verify_result",
+            app.diagnostics.integrity_verify_result.clone(),
+            status_style_from_text(&app.diagnostics.integrity_verify_result),
+        ),
+        line_kv(
+            app.language,
+            "common.export_safe_policy",
+            app.diagnostics.export_safe_policy_status.clone(),
+            Style::default().fg(Color::Blue),
+        ),
+        line_kv(
+            app.language,
+            "common.dependency_audit_snapshot",
+            app.diagnostics.dependency_snapshot_status.clone(),
+            status_style_from_text(&app.diagnostics.dependency_snapshot_status),
+        ),
+    ])
+    .block(
+        Block::default()
+            .title(label(app.language, "diagnostics.summary_title", "diagnostics.summary_title"))
+            .borders(Borders::ALL)
+            .border_style(overall_health_style(app)),
+    )
     .wrap(Wrap { trim: true });
     frame.render_widget(summary, chunks[0]);
 
@@ -462,12 +791,26 @@ fn render_diagnostics(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &
         .items
         .iter()
         .map(|item| {
-            format!("[{}] {}: {}", format_check_status(&item.status), item.name, item.detail)
+            Line::from(vec![
+                Span::styled(
+                    format!("[{}] ", format_check_status(app.language, &item.status)),
+                    check_status_style(&item.status),
+                ),
+                Span::styled(
+                    format!("{}: ", translate_check_name(app.language, &item.name)),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(item.detail.clone()),
+            ])
         })
-        .collect::<Vec<_>>()
-        .join("\n");
+        .collect::<Vec<_>>();
     let details = Paragraph::new(items)
-        .block(Block::default().title("Self-check Details").borders(Borders::ALL))
+        .block(
+            Block::default()
+                .title(label(app.language, "diagnostics.detail_title", "diagnostics.detail_title"))
+                .borders(Borders::ALL)
+                .border_style(overall_health_style(app)),
+        )
         .wrap(Wrap { trim: true });
     frame.render_widget(details, chunks[1]);
 }
@@ -480,25 +823,50 @@ fn render_audit(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Operat
 
     let filtered = filtered_audit_rows(&app.audit);
     let summary = Paragraph::new(format!(
-        "rows loaded: {}   rows shown: {}   search: {:?}   sort: {:?}   mode filter: {:?}\nbackend comparison: {}\nsuppression reasons: {}\nmode transitions: {}",
+        "{}: {}   {}: {}   {}: {:?}   {}: {:?}   {}: {:?}\n{}: {}\n{}: {}\n{}: {}",
+        label(app.language, "common.rows_loaded", "common.rows_loaded"),
         app.audit.rows.len(),
+        label(app.language, "common.rows_shown", "common.rows_shown"),
         filtered.len(),
+        label(app.language, "common.search", "common.search"),
         if app.audit.search.is_empty() { None } else { Some(app.audit.search.as_str()) },
+        label(app.language, "common.sort", "common.sort"),
         app.audit.sort,
+        label(app.language, "common.mode_filter", "common.mode_filter"),
         app.audit.mode_filter.as_deref(),
-        format_counts(&app.audit.stats.by_backend),
-        format_counts(&app.audit.stats.by_suppressed_reason),
+        label(app.language, "common.backend_comparison", "common.backend_comparison"),
+        format_counts(app.language, &app.audit.stats.by_backend),
+        label(app.language, "common.suppression_reasons", "common.suppression_reasons"),
+        format_counts(app.language, &app.audit.stats.by_suppressed_reason),
+        label(app.language, "common.mode_transitions", "common.mode_transitions"),
         filtered.iter().filter(|row| row.event_type == "mode_changed").count(),
     ))
-    .block(Block::default().title("Audit Browser").borders(Borders::ALL))
+    .block(
+        Block::default()
+            .title(label(app.language, "audit.browser_title", "audit.browser_title"))
+            .borders(Borders::ALL)
+            .border_style(status_style_from_text(&app.audit.status)),
+    )
     .wrap(Wrap { trim: true });
     frame.render_widget(summary, chunks[0]);
 
-    let status = Paragraph::new(format!(
-        "{}\nkeys: /=search  o=sort  m=mode filter  r=refresh  q=quit",
-        app.audit.status
-    ))
-    .block(Block::default().title("Audit Controls").borders(Borders::ALL))
+    let status = Paragraph::new(vec![
+        Line::from(Span::styled(
+            app.audit.status.clone(),
+            status_style_from_text(&app.audit.status),
+        )),
+        Line::from(match app.language {
+            UiLanguage::English | UiLanguage::Japanese => {
+                label(app.language, "audit.controls_help", "audit.controls_help").to_string()
+            }
+        }),
+    ])
+    .block(
+        Block::default()
+            .title(label(app.language, "audit.controls_title", "audit.controls_title"))
+            .borders(Borders::ALL)
+            .border_style(status_style_from_text(&app.audit.status)),
+    )
     .wrap(Wrap { trim: true });
     frame.render_widget(status, chunks[1]);
 
@@ -506,32 +874,94 @@ fn render_audit(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Operat
         .iter()
         .take(TUI_AUDIT_CAP)
         .map(|row| {
-            format!(
-                "#{} {} backend={} action={} reason={} mode={}",
-                row.event_id,
-                row.event_type,
-                row.detector_backend,
-                row.selected_action,
-                if row.suppressed_reason.is_empty() { "-" } else { row.suppressed_reason.as_str() },
-                row.mode,
-            )
+            let style = audit_row_style(row);
+            Line::from(Span::styled(
+                format!(
+                    "#{} {} {}={} {}={} {}={} {}={}",
+                    row.event_id,
+                    row.event_type,
+                    label(app.language, "common.backend", "common.backend"),
+                    row.detector_backend,
+                    label(app.language, "common.action", "common.action"),
+                    row.selected_action,
+                    label(app.language, "common.reason", "common.reason"),
+                    if row.suppressed_reason.is_empty() {
+                        "-"
+                    } else {
+                        row.suppressed_reason.as_str()
+                    },
+                    label(app.language, "common.mode", "common.mode"),
+                    row.mode,
+                ),
+                style,
+            ))
         })
-        .collect::<Vec<_>>()
-        .join("\n");
+        .collect::<Vec<_>>();
 
     let rows = Paragraph::new(if lines.is_empty() {
-        "no rows match the current filter".to_string()
+        vec![Line::from(label(app.language, "audit.no_rows", "audit.no_rows"))]
     } else {
         lines
     })
-    .block(Block::default().title("Audit Rows").borders(Borders::ALL))
+    .block(
+        Block::default()
+            .title(label(app.language, "audit.rows_title", "audit.rows_title"))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Blue)),
+    )
     .wrap(Wrap { trim: true });
     frame.render_widget(rows, chunks[2]);
 }
 
 fn handle_global_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<bool, String> {
+    if app.screen == Screen::Welcome {
+        return handle_welcome_keys(app, code);
+    }
+
     match code {
+        KeyCode::Char('x') => {
+            if app.control.stop_armed {
+                match request_runtime_stop(&app.startup.config_path, "tui") {
+                    Ok(message) => {
+                        app.control.stop_armed = false;
+                        refresh_control_state(app);
+                        app.status = template(
+                            app.language,
+                            "status.stop_requested",
+                            &[("message", &message)],
+                        );
+                    }
+                    Err(err) => {
+                        app.control.stop_armed = false;
+                        refresh_control_state(app);
+                        app.status =
+                            template(app.language, "status.stop_failed", &[("error", &err)]);
+                    }
+                }
+            } else {
+                app.control.stop_armed = true;
+                app.status =
+                    label(app.language, "status.stop_confirm", "status.stop_confirm").to_string();
+            }
+            return Ok(false);
+        }
+        KeyCode::Esc if app.control.stop_armed => {
+            app.control.stop_armed = false;
+            app.status =
+                label(app.language, "status.stop_cancelled", "status.stop_cancelled").to_string();
+            return Ok(false);
+        }
         KeyCode::Char('q') => return Ok(true),
+        KeyCode::Char('l') => {
+            toggle_language(app);
+            app.status = language_switched_message(app.language);
+        }
+        KeyCode::Char('R') => {
+            refresh_runtime_snapshot(app);
+            app.status =
+                label(app.language, "status.runtime_refreshed", "status.runtime_refreshed")
+                    .to_string();
+        }
         KeyCode::Char('1') => app.screen = Screen::Dashboard,
         KeyCode::Char('2') => app.screen = Screen::Setup,
         KeyCode::Char('3') => app.screen = Screen::Diagnostics,
@@ -539,12 +969,42 @@ fn handle_global_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<bool, S
         _ => {}
     }
 
+    if app.control.stop_armed {
+        app.control.stop_armed = false;
+    }
+
     match app.screen {
         Screen::Setup => handle_setup_normal_keys(app, code)?,
         Screen::Audit => handle_audit_normal_keys(app, code)?,
-        Screen::Dashboard | Screen::Diagnostics => {}
+        Screen::Welcome | Screen::Dashboard | Screen::Diagnostics => {}
     }
 
+    Ok(false)
+}
+
+fn handle_welcome_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<bool, String> {
+    match code {
+        KeyCode::Char('q') => return Ok(true),
+        KeyCode::Char('e') | KeyCode::Left => {
+            app.language = UiLanguage::English;
+            relocalize_app(app);
+            app.status = language_switched_message(app.language);
+        }
+        KeyCode::Char('j') | KeyCode::Right => {
+            app.language = UiLanguage::Japanese;
+            relocalize_app(app);
+            app.status = language_switched_message(app.language);
+        }
+        KeyCode::Char('l') => {
+            toggle_language(app);
+            app.status = language_switched_message(app.language);
+        }
+        KeyCode::Enter => {
+            app.screen = app.landing_screen;
+            app.status = default_status_message(app.startup_created, app.language);
+        }
+        _ => {}
+    }
     Ok(false)
 }
 
@@ -573,7 +1033,11 @@ fn handle_setup_normal_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<(
         KeyCode::Enter => {
             if let Some(field) = selected_setup_field(&app.setup) {
                 restore_default_for_field(&mut app.setup, field);
-                app.status = format!("restored default for {}", setup_field_label(field));
+                app.status = template(
+                    app.language,
+                    "status.restore_default",
+                    &[("field", setup_field_label(field))],
+                );
             }
         }
         KeyCode::Char('e') => {
@@ -589,7 +1053,8 @@ fn handle_setup_normal_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<(
         }
         KeyCode::Char('s') => {
             if app.setup.page != SetupPage::Preview {
-                app.status = "move to preview before saving".to_string();
+                app.status =
+                    label(app.language, "status.move_preview", "status.move_preview").to_string();
             } else {
                 validate_startup_config(&app.setup.draft).map_err(|err| err.to_string())?;
                 write_startup_config_to_path(&app.startup.config_path, &app.setup.draft)
@@ -603,10 +1068,16 @@ fn handle_setup_normal_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<(
                     &local_self_check,
                     &app.lsm_status,
                     &app.hardening_status,
+                    app.language,
                 );
-                app.audit = load_audit_state(&app.startup, TUI_AUDIT_CAP);
+                app.control = load_control_state(&app.startup, app.language);
+                app.audit = load_audit_state(&app.startup, app.audit_limit, app.language);
                 app.saved_config = true;
-                app.status = format!("saved {}", app.startup.config_path.display());
+                app.status = template(
+                    app.language,
+                    "status.saved",
+                    &[("path", &app.startup.config_path.display().to_string())],
+                );
             }
         }
         _ => {}
@@ -626,8 +1097,9 @@ fn handle_setup_edit_keys(
             app.input_buffer.pop();
         }
         KeyCode::Enter => {
-            apply_custom_field_input(&mut app.setup, field, &app.input_buffer)?;
-            app.status = format!("updated {}", setup_field_label(field));
+            apply_custom_field_input(&mut app.setup, field, &app.input_buffer, app.language)?;
+            app.status =
+                template(app.language, "status.updated", &[("field", setup_field_label(field))]);
             app.input_buffer.clear();
             return Ok(true);
         }
@@ -665,7 +1137,7 @@ fn handle_audit_normal_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<(
             };
         }
         KeyCode::Char('r') => {
-            app.audit = load_audit_state(&app.startup, TUI_AUDIT_CAP);
+            app.audit = load_audit_state(&app.startup, app.audit_limit, app.language);
         }
         _ => {}
     }
@@ -680,7 +1152,11 @@ fn handle_audit_search_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<b
         }
         KeyCode::Enter => {
             app.audit.search = app.input_buffer.trim().chars().take(MAX_AUDIT_SEARCH_LEN).collect();
-            app.status = format!("updated audit search: {:?}", app.audit.search);
+            app.status = template(
+                app.language,
+                "status.audit_search_updated",
+                &[("search", &format!("{:?}", app.audit.search))],
+            );
             return Ok(true);
         }
         KeyCode::Char(ch) if app.input_buffer.len() < MAX_INPUT_BUFFER_LEN => {
@@ -696,45 +1172,63 @@ fn build_diagnostics_summary(
     local_self_check: &LocalSelfCheckReport,
     lsm_status: &LsmStatus,
     hardening_status: &HardeningStatus,
+    language: UiLanguage,
 ) -> DiagnosticsSummary {
     let audit_db_health = local_self_check
         .items
         .iter()
         .find(|item| item.name == "audit_db_health")
         .map(|item| item.detail.clone())
-        .unwrap_or_else(|| "not checked".to_string());
+        .unwrap_or_else(|| {
+            label(language, "diagnostics.not_checked", "diagnostics.not_checked").to_string()
+        });
 
     DiagnosticsSummary {
         local_self_check: local_self_check.clone(),
         audit_db_health,
         dependency_snapshot_status: dependency_snapshot_status(
             &startup.app.diagnostics.security_snapshot_path,
+            language,
         ),
         integrity_verify_result: if startup.app.integrity.config_signature.is_some() {
-            "detached signature verified on load".to_string()
+            label(language, "diagnostics.signature_verified", "diagnostics.signature_verified")
+                .to_string()
         } else {
-            "unsigned config".to_string()
+            label(language, "diagnostics.unsigned_config", "diagnostics.unsigned_config")
+                .to_string()
         },
         export_safe_policy_status: format!(
-            "export cap={} query cap={} pseudo-id={}",
+            "{}={} {}={} {}={}",
+            label(language, "common.export_cap", "common.export_cap"),
             startup.app.audit.export_max_rows,
+            label(language, "common.query_cap", "common.query_cap"),
             startup.app.audit.query_max_rows,
-            if startup.pseudo_id_hmac_key.is_some() { "enabled" } else { "disabled" }
+            label(language, "common.pseudo_id", "common.pseudo_id"),
+            if startup.pseudo_id_hmac_key.is_some() {
+                label(language, "common.enabled", "common.enabled")
+            } else {
+                label(language, "common.disabled", "common.disabled")
+            }
         ),
-        confinement_state: confinement_state(lsm_status, hardening_status),
+        confinement_state: confinement_state(lsm_status, hardening_status, language),
         writable_paths: vec![
-            writable_parent_label("config", &startup.config_path),
-            writable_parent_label("audit", &startup.app.audit.sqlite_path),
+            writable_parent_label(language, "common.config", &startup.config_path),
+            writable_parent_label(language, "screen.audit", &startup.app.audit.sqlite_path),
             writable_parent_label(
-                "security snapshot",
+                language,
+                "common.security_snapshot",
                 &startup.app.diagnostics.security_snapshot_path,
             ),
         ],
-        recommendations: runtime_recommendations(lsm_status, hardening_status),
+        recommendations: runtime_recommendations(lsm_status, hardening_status, language),
     }
 }
 
-fn load_audit_state(startup: &LoadedStartupConfig, audit_limit: usize) -> AuditState {
+fn load_audit_state(
+    startup: &LoadedStartupConfig,
+    audit_limit: usize,
+    language: UiLanguage,
+) -> AuditState {
     let cfg = AuditStoreConfig {
         sqlite_path: startup.app.audit.sqlite_path.clone(),
         busy_timeout_ms: startup.app.audit.busy_timeout_ms,
@@ -752,7 +1246,8 @@ fn load_audit_state(startup: &LoadedStartupConfig, audit_limit: usize) -> AuditS
                 by_suppressed_reason: BTreeMap::new(),
                 by_mode: BTreeMap::new(),
             },
-            status: "audit db does not exist yet; browser is read-only and idle".to_string(),
+            status: label(language, "audit.status.missing_db", "audit.status.missing_db")
+                .to_string(),
             search: String::new(),
             sort: AuditSort::NewestFirst,
             mode_filter: None,
@@ -771,7 +1266,7 @@ fn load_audit_state(startup: &LoadedStartupConfig, audit_limit: usize) -> AuditS
                     by_suppressed_reason: BTreeMap::new(),
                     by_mode: BTreeMap::new(),
                 },
-                status: format!("failed to open audit db read-only: {err}"),
+                status: template(language, "audit.status.open_failed", &[("error", &err)]),
                 search: String::new(),
                 sort: AuditSort::NewestFirst,
                 mode_filter: None,
@@ -796,23 +1291,43 @@ fn load_audit_state(startup: &LoadedStartupConfig, audit_limit: usize) -> AuditS
     AuditState {
         rows,
         stats,
-        status: "audit browser uses read-only sqlite and caps visible rows".to_string(),
+        status: label(language, "audit.status.ready", "audit.status.ready").to_string(),
         search: String::new(),
         sort: AuditSort::NewestFirst,
         mode_filter: None,
     }
 }
 
+fn load_control_state(startup: &LoadedStartupConfig, language: UiLanguage) -> BotControlState {
+    let socket_path = control_socket_path(&startup.config_path);
+    match request_runtime_status(&startup.config_path) {
+        Ok(runtime) => BotControlState {
+            socket_path,
+            runtime: Some(runtime),
+            status: label(language, "control.status.connected", "control.status.connected")
+                .to_string(),
+            stop_armed: false,
+        },
+        Err(err) => BotControlState {
+            socket_path,
+            runtime: None,
+            status: template(language, "control.status.unavailable", &[("error", &err)]),
+            stop_armed: false,
+        },
+    }
+}
+
 fn build_setup_field_block(app: &OperatorTuiApp) -> String {
-    let mut out = vec![format!("{}\n", setup_page_help(app.setup.page))];
+    let mut out = vec![format!("{}\n", setup_page_help(app.language, app.setup.page))];
 
     for (index, field) in setup_fields_for_page(app.setup.page).iter().enumerate() {
         let marker = if index == app.setup.selected { ">" } else { " " };
         out.push(format!(
-            "{marker} {} = {}\n  default: {}\n",
+            "{marker} {} = {}\n  {}: {}\n",
             setup_field_label(*field),
-            setup_field_value(&app.setup.draft, *field),
-            setup_default_value(&app.setup.defaults, *field)
+            setup_field_value(app.language, &app.setup.draft, *field),
+            label(app.language, "common.default", "common.default"),
+            setup_default_value(app.language, &app.setup.defaults, *field)
         ));
     }
 
@@ -821,43 +1336,83 @@ fn build_setup_field_block(app: &OperatorTuiApp) -> String {
 
 fn build_runtime_environment_block(app: &OperatorTuiApp) -> String {
     format!(
-        "detected LSM: {}\nhardening status: {}\nwritable paths:\n{}\n\nservice/container recommendations:\n{}",
+        "{}: {}\n{}: {}\n{}:\n{}\n\n{}:\n{}",
+        label(app.language, "common.detected_lsm", "common.detected_lsm"),
         app.lsm_status.active_lsm_summary(),
+        label(app.language, "common.hardening_status", "common.hardening_status"),
         app.hardening_status.summary(),
+        label(app.language, "common.writable_paths", "common.writable_paths"),
         app.diagnostics.writable_paths.join("\n"),
+        label(
+            app.language,
+            "common.service_container_recommendations",
+            "common.service_container_recommendations"
+        ),
         app.diagnostics.recommendations.join("\n"),
     )
 }
 
 fn build_setup_preview(app: &OperatorTuiApp) -> String {
-    let yaml = crate::config::render_startup_config_yaml(&app.setup.draft)
-        .unwrap_or_else(|err| format!("# render failed: {err}\n"));
-    format!("strict config preview:\n\n{yaml}")
+    let yaml = crate::config::render_startup_config_yaml(&app.setup.draft).unwrap_or_else(|err| {
+        format!(
+            "{}\n",
+            template(app.language, "setup.preview.render_failed", &[("error", &err.to_string())],)
+        )
+    });
+    format!("{}:\n\n{yaml}", label(app.language, "setup.preview.label", "setup.preview.label"))
 }
 
-fn build_setup_validation_block(app: &OperatorTuiApp) -> String {
+fn build_setup_validation_lines(app: &OperatorTuiApp) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
     match validate_startup_config(&app.setup.draft) {
-        Ok(()) => lines.push("[pass] strict schema validation passed".to_string()),
-        Err(err) => lines.push(format!("[fail] strict schema validation failed: {err}")),
+        Ok(()) => lines.push(Line::from(vec![
+            Span::styled(
+                format!("[{}] ", format_check_status(app.language, &CheckStatus::Pass)),
+                success_style(),
+            ),
+            Span::raw(label(app.language, "validation.pass", "validation.pass").to_string()),
+        ])),
+        Err(err) => lines.push(Line::from(vec![
+            Span::styled(
+                format!("[{}] ", format_check_status(app.language, &CheckStatus::Fail)),
+                error_style(),
+            ),
+            Span::raw(template(app.language, "validation.fail", &[("error", &err.to_string())])),
+        ])),
     }
 
     if let Some(signature) = &app.setup.draft.integrity.config_signature {
-        lines.push(format!(
-            "[info] signature path={} key env={} env_present={}",
-            signature.detached_hmac_sha256_path.display(),
-            signature.hmac_key_env,
-            std::env::var(&signature.hmac_key_env).is_ok()
-        ));
+        lines.push(Line::from(vec![
+            Span::styled("[info] ", info_style()),
+            Span::raw(template(
+                app.language,
+                "validation.signature_info",
+                &[
+                    ("path", &signature.detached_hmac_sha256_path.display().to_string()),
+                    ("env", &signature.hmac_key_env),
+                    ("present", &std::env::var(&signature.hmac_key_env).is_ok().to_string()),
+                ],
+            )),
+        ]));
     } else {
-        lines.push("[info] detached config signature is disabled".to_string());
+        lines.push(Line::from(vec![
+            Span::styled("[info] ", info_style()),
+            Span::raw(
+                label(
+                    app.language,
+                    "validation.signature_disabled",
+                    "validation.signature_disabled",
+                )
+                .to_string(),
+            ),
+        ]));
     }
 
-    lines.join("\n")
+    lines
 }
 
-fn dependency_snapshot_status(path: &Path) -> String {
+fn dependency_snapshot_status(path: &Path, language: UiLanguage) -> String {
     match fs::metadata(path) {
         Ok(meta) => {
             let modified = meta
@@ -865,49 +1420,82 @@ fn dependency_snapshot_status(path: &Path) -> String {
                 .ok()
                 .and_then(|value| value.duration_since(SystemTime::UNIX_EPOCH).ok())
                 .map(|duration| duration.as_secs().to_string())
-                .unwrap_or_else(|| "unknown".to_string());
-            format!("present at {} (mtime unix={modified})", path.display())
+                .unwrap_or_else(|| label(language, "common.unknown", "common.unknown").to_string());
+            template(
+                language,
+                "diagnostics.snapshot_present",
+                &[("path", &path.display().to_string()), ("mtime", &modified)],
+            )
         }
-        Err(_) => format!("missing at {}", path.display()),
+        Err(_) => template(
+            language,
+            "diagnostics.snapshot_missing",
+            &[("path", &path.display().to_string())],
+        ),
     }
 }
 
-fn confinement_state(lsm_status: &LsmStatus, hardening_status: &HardeningStatus) -> String {
+fn confinement_state(
+    lsm_status: &LsmStatus,
+    hardening_status: &HardeningStatus,
+    language: UiLanguage,
+) -> String {
     if let Some(profile) = &lsm_status.apparmor_profile {
-        return format!("AppArmor profile {profile}");
+        return template(language, "diagnostics.apparmor_profile", &[("profile", profile)]);
     }
     if let Some(context) = &lsm_status.selinux_context {
-        return format!("SELinux context {context}");
+        return template(language, "diagnostics.selinux_context", &[("context", context)]);
     }
     if lsm_status.active_modules.is_empty() {
-        return format!("unconfined or undetected; {}", hardening_status.summary());
+        return template(
+            language,
+            "diagnostics.unconfined",
+            &[("summary", &hardening_status.summary())],
+        );
     }
-    format!("lsm={}, {}", lsm_status.active_lsm_summary(), hardening_status.summary())
+    template(
+        language,
+        "diagnostics.lsm_summary",
+        &[("lsm", &lsm_status.active_lsm_summary()), ("summary", &hardening_status.summary())],
+    )
 }
 
-fn writable_parent_label(label: &str, path: &Path) -> String {
+fn writable_parent_label(language: UiLanguage, label_key: &str, path: &Path) -> String {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    format!("{label}: {}", parent.display())
+    template(
+        language,
+        "diagnostics.persisted_label",
+        &[
+            ("label", label(language, label_key, label_key)),
+            ("path", &parent.display().to_string()),
+        ],
+    )
 }
 
 fn runtime_recommendations(
     lsm_status: &LsmStatus,
     hardening_status: &HardeningStatus,
+    language: UiLanguage,
 ) -> Vec<String> {
     let mut out = Vec::new();
     if lsm_status.major_lsm.is_none() {
-        out.push("- prefer running under AppArmor or SELinux confinement".to_string());
+        out.push(
+            label(language, "recommendation.prefer_lsm", "recommendation.prefer_lsm").to_string(),
+        );
     }
     if !hardening_status.hardened_x64_requested {
         out.push(
-            "- consider hardened-x64 release profile for Linux x86_64 deployments".to_string(),
+            label(language, "recommendation.hardened_release", "recommendation.hardened_release")
+                .to_string(),
         );
     }
     out.push(
-        "- mount state directories writable but keep source tree read-only in service/container"
+        label(language, "recommendation.mount_state", "recommendation.mount_state").to_string(),
+    );
+    out.push(
+        label(language, "recommendation.persist_config", "recommendation.persist_config")
             .to_string(),
     );
-    out.push("- keep OO_CONFIG_PATH and audit sqlite on persistent storage".to_string());
     out
 }
 
@@ -953,9 +1541,9 @@ fn filtered_audit_rows(audit: &AuditState) -> Vec<AuditEventRow> {
     rows
 }
 
-fn format_counts(counts: &BTreeMap<String, usize>) -> String {
+fn format_counts(language: UiLanguage, counts: &BTreeMap<String, usize>) -> String {
     if counts.is_empty() {
-        return "none".to_string();
+        return label(language, "common.none", "common.none").to_string();
     }
     counts.iter().map(|(key, value)| format!("{key}={value}")).collect::<Vec<_>>().join(", ")
 }
@@ -984,27 +1572,31 @@ fn next_setup_page(page: SetupPage) -> SetupPage {
     }
 }
 
-fn setup_page_name(page: SetupPage) -> &'static str {
+fn setup_page_name(language: UiLanguage, page: SetupPage) -> &'static str {
     match page {
-        SetupPage::Detector => "detector",
-        SetupPage::Bot => "bot",
-        SetupPage::Audit => "audit",
-        SetupPage::Diagnostics => "diagnostics",
-        SetupPage::Integrity => "integrity",
-        SetupPage::Runtime => "runtime environment",
-        SetupPage::Preview => "preview",
+        SetupPage::Detector => label(language, "setup.page.detector", "setup.page.detector"),
+        SetupPage::Bot => label(language, "setup.page.bot", "setup.page.bot"),
+        SetupPage::Audit => label(language, "setup.page.audit", "setup.page.audit"),
+        SetupPage::Diagnostics => {
+            label(language, "setup.page.diagnostics", "setup.page.diagnostics")
+        }
+        SetupPage::Integrity => label(language, "setup.page.integrity", "setup.page.integrity"),
+        SetupPage::Runtime => label(language, "setup.page.runtime", "setup.page.runtime"),
+        SetupPage::Preview => label(language, "setup.page.preview", "setup.page.preview"),
     }
 }
 
-fn setup_page_help(page: SetupPage) -> &'static str {
+fn setup_page_help(language: UiLanguage, page: SetupPage) -> &'static str {
     match page {
-        SetupPage::Detector => "detector defaults and matching behavior",
-        SetupPage::Bot => "bot response formatting and outbound caps",
-        SetupPage::Audit => "audit storage, export caps, and pseudo-id policy",
-        SetupPage::Diagnostics => "startup checks and build/security verification policy",
-        SetupPage::Integrity => "detached signature verification and signing guidance",
-        SetupPage::Runtime => "detected environment, writable paths, and deployment guidance",
-        SetupPage::Preview => "strict yaml preview and validation before write",
+        SetupPage::Detector => label(language, "setup.help.detector", "setup.help.detector"),
+        SetupPage::Bot => label(language, "setup.help.bot", "setup.help.bot"),
+        SetupPage::Audit => label(language, "setup.help.audit", "setup.help.audit"),
+        SetupPage::Diagnostics => {
+            label(language, "setup.help.diagnostics", "setup.help.diagnostics")
+        }
+        SetupPage::Integrity => label(language, "setup.help.integrity", "setup.help.integrity"),
+        SetupPage::Runtime => label(language, "setup.help.runtime", "setup.help.runtime"),
+        SetupPage::Preview => label(language, "setup.help.preview", "setup.help.preview"),
     }
 }
 
@@ -1162,6 +1754,7 @@ fn apply_custom_field_input(
     setup: &mut SetupState,
     field: SetupField,
     raw: &str,
+    language: UiLanguage,
 ) -> Result<(), String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -1182,29 +1775,37 @@ fn apply_custom_field_input(
         SetupField::StampText => setup.draft.bot.stamp_text = trimmed.to_string(),
         SetupField::SendTemplate => setup.draft.bot.send_template = trimmed.to_string(),
         SetupField::ReactionEmojiId => {
-            setup.draft.bot.reaction.emoji_id =
-                trimmed.parse::<u64>().map_err(|_| "emoji_id must be a u64".to_string())?;
+            setup.draft.bot.reaction.emoji_id = trimmed.parse::<u64>().map_err(|_| {
+                label(language, "error.emoji_id_u64", "error.emoji_id_u64").to_string()
+            })?;
         }
         SetupField::ReactionEmojiName => setup.draft.bot.reaction.emoji_name = trimmed.to_string(),
         SetupField::ReactionAnimated => {}
         SetupField::MaxCountCap => {
-            setup.draft.bot.max_count_cap =
-                trimmed.parse::<usize>().map_err(|_| "max_count_cap must be usize".to_string())?;
+            setup.draft.bot.max_count_cap = trimmed.parse::<usize>().map_err(|_| {
+                label(language, "error.max_count_cap_usize", "error.max_count_cap_usize")
+                    .to_string()
+            })?;
         }
         SetupField::MaxSendChars => {
-            setup.draft.bot.max_send_chars =
-                trimmed.parse::<usize>().map_err(|_| "max_send_chars must be usize".to_string())?;
+            setup.draft.bot.max_send_chars = trimmed.parse::<usize>().map_err(|_| {
+                label(language, "error.max_send_chars_usize", "error.max_send_chars_usize")
+                    .to_string()
+            })?;
         }
         SetupField::ActionPolicy => {}
         SetupField::AuditSqlitePath => setup.draft.audit.sqlite_path = PathBuf::from(trimmed),
         SetupField::AuditExportMaxRows => {
-            setup.draft.audit.export_max_rows = trimmed
-                .parse::<usize>()
-                .map_err(|_| "export_max_rows must be usize".to_string())?;
+            setup.draft.audit.export_max_rows = trimmed.parse::<usize>().map_err(|_| {
+                label(language, "error.export_max_rows_usize", "error.export_max_rows_usize")
+                    .to_string()
+            })?;
         }
         SetupField::AuditQueryMaxRows => {
-            setup.draft.audit.query_max_rows =
-                trimmed.parse::<usize>().map_err(|_| "query_max_rows must be usize".to_string())?;
+            setup.draft.audit.query_max_rows = trimmed.parse::<usize>().map_err(|_| {
+                label(language, "error.query_max_rows_usize", "error.query_max_rows_usize")
+                    .to_string()
+            })?;
         }
         SetupField::PseudoIdHmacKeyEnv => {
             setup.draft.integrity.pseudo_id_hmac_key_env = Some(trimmed.to_string());
@@ -1268,10 +1869,14 @@ fn setup_field_label(field: SetupField) -> &'static str {
     }
 }
 
-fn setup_field_value(config: &StartupConfig, field: SetupField) -> String {
+fn setup_field_value(language: UiLanguage, config: &StartupConfig, field: SetupField) -> String {
     match field {
-        SetupField::DetectorBackend => serde_variant_name(&config.detector.backend),
-        SetupField::TargetReadings => config.detector.target_readings.join(", "),
+        SetupField::DetectorBackend => serde_variant_name(language, &config.detector.backend),
+        SetupField::TargetReadings => format!(
+            "{} ({})",
+            config.detector.target_readings.join(", "),
+            label(language, "setup.target_readings_hint", "setup.target_readings_hint")
+        ),
         SetupField::LiteralSequencePatterns => config.detector.literal_sequence_patterns.join(", "),
         SetupField::SpecialPhrases => config.detector.special_phrases.join(", "),
         SetupField::StampText => config.bot.stamp_text.clone(),
@@ -1281,7 +1886,7 @@ fn setup_field_value(config: &StartupConfig, field: SetupField) -> String {
         SetupField::ReactionAnimated => config.bot.reaction.animated.to_string(),
         SetupField::MaxCountCap => config.bot.max_count_cap.to_string(),
         SetupField::MaxSendChars => config.bot.max_send_chars.to_string(),
-        SetupField::ActionPolicy => serde_variant_name(&config.bot.action_policy),
+        SetupField::ActionPolicy => serde_variant_name(language, &config.bot.action_policy),
         SetupField::AuditSqlitePath => config.audit.sqlite_path.display().to_string(),
         SetupField::AuditExportMaxRows => config.audit.export_max_rows.to_string(),
         SetupField::AuditQueryMaxRows => config.audit.query_max_rows.to_string(),
@@ -1294,13 +1899,13 @@ fn setup_field_value(config: &StartupConfig, field: SetupField) -> String {
             .config_signature
             .as_ref()
             .map(|value| value.detached_hmac_sha256_path.display().to_string())
-            .unwrap_or_else(|| "disabled".to_string()),
+            .unwrap_or_else(|| label(language, "common.disabled", "common.disabled").to_string()),
         SetupField::SignatureHmacEnv => config
             .integrity
             .config_signature
             .as_ref()
             .map(|value| value.hmac_key_env.clone())
-            .unwrap_or_else(|| "disabled".to_string()),
+            .unwrap_or_else(|| label(language, "common.disabled", "common.disabled").to_string()),
         SetupField::LocalSelfCheck => config.diagnostics.local_self_check_on_startup.to_string(),
         SetupField::VerifyHardeningArtifacts => {
             config.diagnostics.verify_hardening_artifacts.to_string()
@@ -1309,13 +1914,17 @@ fn setup_field_value(config: &StartupConfig, field: SetupField) -> String {
             config.diagnostics.verify_generated_artifacts.to_string()
         }
         SetupField::DependencySecurityCheckMode => {
-            serde_variant_name(&config.diagnostics.dependency_security_check_mode)
+            serde_variant_name(language, &config.diagnostics.dependency_security_check_mode)
         }
     }
 }
 
-fn setup_default_value(defaults: &StartupConfig, field: SetupField) -> String {
-    setup_field_value(defaults, field)
+fn setup_default_value(
+    language: UiLanguage,
+    defaults: &StartupConfig,
+    field: SetupField,
+) -> String {
+    setup_field_value(language, defaults, field)
 }
 
 fn parse_csv(raw: &str) -> Vec<String> {
@@ -1326,26 +1935,305 @@ fn parse_csv(raw: &str) -> Vec<String> {
         .collect()
 }
 
-fn serde_variant_name<T: serde::Serialize>(value: &T) -> String {
+fn serde_variant_name<T: serde::Serialize>(language: UiLanguage, value: &T) -> String {
     serde_json::to_value(value)
         .ok()
         .and_then(|encoded| encoded.as_str().map(ToString::to_string))
-        .unwrap_or_else(|| "<unknown>".to_string())
+        .unwrap_or_else(|| {
+            label(language, "common.unknown_variant", "common.unknown_variant").to_string()
+        })
 }
 
-fn check_status_label(healthy: bool) -> &'static str {
+fn check_status_label(language: UiLanguage, healthy: bool) -> &'static str {
     if healthy {
-        "pass"
+        label(language, "common.pass", "common.pass")
     } else {
-        "warn/fail"
+        label(language, "common.warn_fail", "common.warn_fail")
     }
 }
 
-fn format_check_status(status: &CheckStatus) -> &'static str {
+fn format_check_status(language: UiLanguage, status: &CheckStatus) -> &'static str {
     match status {
-        CheckStatus::Pass => "pass",
-        CheckStatus::Warn => "warn",
-        CheckStatus::Fail => "fail",
+        CheckStatus::Pass => label(language, "common.pass", "common.pass"),
+        CheckStatus::Warn => label(language, "common.warn", "common.warn"),
+        CheckStatus::Fail => label(language, "common.fail", "common.fail"),
+    }
+}
+
+fn catalog() -> &'static UiCatalog {
+    static CATALOG: OnceLock<UiCatalog> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        serde_yaml::from_str(OPERATOR_TUI_I18N_YAML).expect("operator tui i18n catalog")
+    })
+}
+
+fn label<'a>(language: UiLanguage, key: &'a str, fallback: &'a str) -> &'a str {
+    let map = match language {
+        UiLanguage::English => &catalog().en,
+        UiLanguage::Japanese => &catalog().ja,
+    };
+    map.get(key).map(String::as_str).unwrap_or_else(|| match language {
+        UiLanguage::English => key,
+        UiLanguage::Japanese => fallback,
+    })
+}
+
+fn template(language: UiLanguage, key: &str, replacements: &[(&str, &str)]) -> String {
+    let mut value = label(language, key, key).to_string();
+    for (name, replacement) in replacements {
+        value = value.replace(&format!("{{{name}}}"), replacement);
+    }
+    value
+}
+
+fn detect_ui_language() -> UiLanguage {
+    let locale = std::env::var("LC_ALL")
+        .or_else(|_| std::env::var("LANG"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if locale.starts_with("ja") {
+        UiLanguage::Japanese
+    } else {
+        UiLanguage::English
+    }
+}
+
+fn toggle_language(app: &mut OperatorTuiApp) {
+    app.language = match app.language {
+        UiLanguage::English => UiLanguage::Japanese,
+        UiLanguage::Japanese => UiLanguage::English,
+    };
+    relocalize_app(app);
+}
+
+fn relocalize_app(app: &mut OperatorTuiApp) {
+    app.diagnostics = build_diagnostics_summary(
+        &app.startup,
+        &app.diagnostics.local_self_check,
+        &app.lsm_status,
+        &app.hardening_status,
+        app.language,
+    );
+    let stop_armed = app.control.stop_armed;
+    app.control = load_control_state(&app.startup, app.language);
+    app.control.stop_armed = stop_armed;
+    app.audit = load_audit_state(&app.startup, app.audit_limit, app.language);
+}
+
+fn refresh_control_state(app: &mut OperatorTuiApp) {
+    let stop_armed = app.control.stop_armed;
+    app.control = load_control_state(&app.startup, app.language);
+    app.control.stop_armed = stop_armed;
+}
+
+fn refresh_runtime_snapshot(app: &mut OperatorTuiApp) {
+    app.lsm_status = detect_lsm_status();
+    app.hardening_status = detect_hardening_status();
+    let local_self_check = run_local_self_check(&app.startup);
+    app.diagnostics = build_diagnostics_summary(
+        &app.startup,
+        &local_self_check,
+        &app.lsm_status,
+        &app.hardening_status,
+        app.language,
+    );
+    refresh_control_state(app);
+    app.audit = load_audit_state(&app.startup, app.audit_limit, app.language);
+}
+
+fn default_status_message(startup_created: bool, language: UiLanguage) -> String {
+    if startup_created {
+        label(language, "status.startup_created", "status.startup_created").to_string()
+    } else {
+        label(language, "status.default_nav", "status.default_nav").to_string()
+    }
+}
+
+fn language_switched_message(language: UiLanguage) -> String {
+    match language {
+        UiLanguage::English => {
+            label(language, "status.language_english", "status.language_english").to_string()
+        }
+        UiLanguage::Japanese => {
+            label(language, "status.language_japanese", "status.language_japanese").to_string()
+        }
+    }
+}
+
+fn screen_name(language: UiLanguage, screen: Screen) -> &'static str {
+    match screen {
+        Screen::Welcome => label(language, "screen.welcome", "screen.welcome"),
+        Screen::Dashboard => label(language, "screen.dashboard", "screen.dashboard"),
+        Screen::Setup => label(language, "screen.setup", "screen.setup"),
+        Screen::Diagnostics => label(language, "screen.diagnostics", "screen.diagnostics"),
+        Screen::Audit => label(language, "screen.audit", "screen.audit"),
+    }
+}
+
+fn language_chip(language: UiLanguage, selected: bool) -> Span<'static> {
+    let base = match language {
+        UiLanguage::English => label(language, "common.english", "English"),
+        UiLanguage::Japanese => label(language, "common.japanese", "日本語"),
+    };
+    let text = if selected { format!("[{base}]") } else { base.to_string() };
+    let style = if selected {
+        Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    Span::styled(text, style)
+}
+
+fn success_style() -> Style {
+    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+}
+
+fn warning_style() -> Style {
+    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+}
+
+fn error_style() -> Style {
+    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+}
+
+fn info_style() -> Style {
+    Style::default().fg(Color::Cyan)
+}
+
+fn check_status_style(status: &CheckStatus) -> Style {
+    match status {
+        CheckStatus::Pass => success_style(),
+        CheckStatus::Warn => warning_style(),
+        CheckStatus::Fail => error_style(),
+    }
+}
+
+fn status_style_from_text(text: &str) -> Style {
+    let lower = text.to_ascii_lowercase();
+    let has_error_keyword =
+        label(UiLanguage::English, "style.error_keywords", "style.error_keywords")
+            .split(',')
+            .any(|keyword| !keyword.is_empty() && lower.contains(keyword))
+            || label(UiLanguage::Japanese, "style.error_keywords", "style.error_keywords")
+                .split(',')
+                .any(|keyword| !keyword.is_empty() && text.contains(keyword));
+    if has_error_keyword {
+        error_style()
+    } else {
+        let has_warn_keyword =
+            label(UiLanguage::English, "style.warn_keywords", "style.warn_keywords")
+                .split(',')
+                .any(|keyword| !keyword.is_empty() && lower.contains(keyword))
+                || label(UiLanguage::Japanese, "style.warn_keywords", "style.warn_keywords")
+                    .split(',')
+                    .any(|keyword| !keyword.is_empty() && text.contains(keyword));
+        if has_warn_keyword {
+            warning_style()
+        } else {
+            info_style()
+        }
+    }
+}
+
+fn lsm_style(lsm_status: &LsmStatus) -> Style {
+    if lsm_status.major_lsm.is_some() {
+        success_style()
+    } else {
+        warning_style()
+    }
+}
+
+fn hardening_style(hardening_status: &HardeningStatus) -> Style {
+    if hardening_status.warnings.is_empty() {
+        success_style()
+    } else {
+        warning_style()
+    }
+}
+
+fn overall_health_style(app: &OperatorTuiApp) -> Style {
+    if !app.diagnostics.local_self_check.healthy
+        || app.control.runtime.is_none()
+        || app.lsm_status.major_lsm.is_none()
+        || !app.hardening_status.warnings.is_empty()
+    {
+        warning_style()
+    } else {
+        success_style()
+    }
+}
+
+fn validation_border_style(app: &OperatorTuiApp) -> Style {
+    match validate_startup_config(&app.setup.draft) {
+        Ok(()) => success_style(),
+        Err(_) => error_style(),
+    }
+}
+
+fn line_kv(language: UiLanguage, key: &str, value: String, value_style: Style) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!("{}: ", label(language, key, key)),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(value, value_style),
+    ])
+}
+
+fn audit_row_style(row: &AuditEventRow) -> Style {
+    if !row.suppressed_reason.is_empty() {
+        warning_style()
+    } else if row.event_type == "mode_changed" {
+        info_style()
+    } else {
+        Style::default()
+    }
+}
+
+fn runtime_state_label(language: UiLanguage, control: &BotControlState) -> String {
+    if control.runtime.is_some() {
+        label(language, "control.runtime.running", "control.runtime.running").to_string()
+    } else {
+        label(language, "control.runtime.not_connected", "control.runtime.not_connected")
+            .to_string()
+    }
+}
+
+fn runtime_pid_label(language: UiLanguage, control: &BotControlState) -> String {
+    control
+        .runtime
+        .as_ref()
+        .map(|runtime| runtime.pid.to_string())
+        .unwrap_or_else(|| label(language, "common.none", "common.none").to_string())
+}
+
+fn control_state_style(control: &BotControlState) -> Style {
+    if control.runtime.is_some() {
+        success_style()
+    } else {
+        warning_style()
+    }
+}
+
+fn translate_check_name(language: UiLanguage, name: &str) -> String {
+    match name {
+        "audit_db_health" => {
+            label(language, "check.audit_db_health", "check.audit_db_health").to_string()
+        }
+        "startup_config" => {
+            label(language, "check.startup_config", "check.startup_config").to_string()
+        }
+        "hardening_script" => {
+            label(language, "check.hardening_script", "check.hardening_script").to_string()
+        }
+        "pinned_hardened_toolchain" => {
+            label(language, "check.pinned_hardened_toolchain", "check.pinned_hardened_toolchain")
+                .to_string()
+        }
+        "hardening_verifier" => {
+            label(language, "check.hardening_verifier", "check.hardening_verifier").to_string()
+        }
+        _ => name.to_string(),
     }
 }
 
@@ -1367,6 +2255,9 @@ fn truncate_middle(value: &str, cap: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::tempdir;
+
+    use crate::audit::{AuditEventInput, AuditEventType, AuditStore, AuditStoreConfig};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -1399,6 +2290,10 @@ mod tests {
         lines.join("\n")
     }
 
+    fn compact_snapshot(snapshot: &str) -> String {
+        snapshot.chars().filter(|ch| !ch.is_whitespace()).collect()
+    }
+
     fn sample_app(screen: Screen) -> OperatorTuiApp {
         let startup = sample_startup();
         let local_self_check = LocalSelfCheckReport { healthy: true, items: vec![] };
@@ -1406,7 +2301,10 @@ mod tests {
             status: "snapshot".to_string(),
             startup_created: false,
             saved_config: false,
+            audit_limit: TUI_AUDIT_CAP,
+            language: UiLanguage::English,
             screen,
+            landing_screen: Screen::Dashboard,
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
             lsm_status: LsmStatus {
@@ -1439,6 +2337,22 @@ mod tests {
                     "- prefer AppArmor".to_string(),
                     "- keep state persistent".to_string(),
                 ],
+            },
+            control: BotControlState {
+                socket_path: PathBuf::from("/run/oo-bot/control.sock"),
+                runtime: Some(RuntimeControlStatus {
+                    state: "running".to_string(),
+                    pid: 4242,
+                    started_at_unix: 1_700_000_000,
+                    config_path: "config/oo-bot.yaml".to_string(),
+                    config_fingerprint: "fingerprint".to_string(),
+                    detector_backend: "morphological_reading".to_string(),
+                    active_lsm: "apparmor".to_string(),
+                    hardening_status: "ok".to_string(),
+                    socket_path: "/run/oo-bot/control.sock".to_string(),
+                }),
+                status: "runtime control channel connected".to_string(),
+                stop_armed: false,
             },
             setup: SetupState {
                 draft: startup.app.clone(),
@@ -1568,5 +2482,87 @@ mod tests {
         assert!(!snapshot.contains("message-raw-id"));
         assert!(!snapshot.contains("super-secret-reading"));
         assert!(!snapshot.contains("raw-message-fragment"));
+    }
+
+    #[test]
+    fn welcome_screen_shows_banner_and_language_choices() {
+        let app = sample_app(Screen::Welcome);
+        let snapshot = render_snapshot(&app, 100, 24);
+        let compact = compact_snapshot(&snapshot);
+        assert!(compact.contains("WELCOMETOOODETECTION"));
+        assert!(compact.contains("RESPONSEANALYZER"));
+        assert!(compact.contains("English"));
+        assert!(compact.contains("日本語"));
+    }
+
+    #[test]
+    fn japanese_language_renders_polished_labels() {
+        let mut app = sample_app(Screen::Diagnostics);
+        app.language = UiLanguage::Japanese;
+        relocalize_app(&mut app);
+        let snapshot = render_snapshot(&app, 100, 24);
+        let compact = compact_snapshot(&snapshot);
+        assert!(compact.contains("診断サマリー"));
+        assert!(compact.contains("有効なLSM"));
+        assert!(compact.contains("自己診断の詳細"));
+    }
+
+    #[test]
+    fn setup_edit_can_update_target_readings_from_csv() {
+        let mut app = sample_app(Screen::Setup);
+        apply_custom_field_input(
+            &mut app.setup,
+            SetupField::TargetReadings,
+            "おおき, かみ ,オオキ",
+            UiLanguage::Japanese,
+        )
+        .expect("apply target readings edit");
+
+        assert_eq!(
+            app.setup.draft.detector.target_readings,
+            vec!["おおき".to_string(), "かみ".to_string(), "オオキ".to_string()]
+        );
+    }
+
+    #[test]
+    fn audit_limit_is_preserved_across_reload_paths() {
+        let dir = tempdir().expect("temp dir");
+        let sqlite_path = dir.path().join("audit.sqlite3");
+        let cfg = AuditStoreConfig {
+            sqlite_path: sqlite_path.clone(),
+            busy_timeout_ms: 1000,
+            export_max_rows: 1000,
+            query_max_rows: 1000,
+        };
+
+        let mut store = AuditStore::open_rw(&cfg, None).expect("open rw audit store");
+        for _ in 0..3 {
+            let input = AuditEventInput {
+                event_type: AuditEventType::ModeChanged,
+                detector_backend: "morphological_reading".to_string(),
+                selected_action: "noop".to_string(),
+                mode: "normal".to_string(),
+                ..AuditEventInput::default()
+            };
+            let _ = store.record_event(&input).expect("insert event");
+        }
+        drop(store);
+
+        let mut app = sample_app(Screen::Audit);
+        app.startup.app.audit.sqlite_path = sqlite_path;
+        app.startup.app.audit.query_max_rows = 1000;
+        app.startup.app.audit.busy_timeout_ms = 1000;
+        app.audit_limit = 1;
+        app.audit = load_audit_state(&app.startup, app.audit_limit, app.language);
+        assert_eq!(app.audit.rows.len(), 1);
+
+        relocalize_app(&mut app);
+        assert_eq!(app.audit.rows.len(), 1);
+
+        refresh_runtime_snapshot(&mut app);
+        assert_eq!(app.audit.rows.len(), 1);
+
+        handle_audit_normal_keys(&mut app, KeyCode::Char('r')).expect("audit reload");
+        assert_eq!(app.audit.rows.len(), 1);
     }
 }

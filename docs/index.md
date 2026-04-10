@@ -16,6 +16,7 @@
   - [architecture/module-boundaries.md](architecture/module-boundaries.md)
   - [architecture/runtime-protection.md](architecture/runtime-protection.md)
   - [architecture/sandboxing.md](architecture/sandboxing.md)
+  - [architecture/control-plane.md](architecture/control-plane.md)
   - [architecture/governor-and-guardrails.md](architecture/governor-and-guardrails.md)
   - [architecture/replay-harness.md](architecture/replay-harness.md)
   - [architecture/config-model.md](architecture/config-model.md)
@@ -29,6 +30,7 @@
   - [security/incident-response.md](security/incident-response.md)
 - 運用
   - [operations/deployment.md](operations/deployment.md)
+  - [operations/service-control.md](operations/service-control.md)
   - [operations/hardening-and-lsm.md](operations/hardening-and-lsm.md)
   - [operations/runtime-modes.md](operations/runtime-modes.md)
   - [operations/observability.md](operations/observability.md)
@@ -46,6 +48,7 @@
   - [reference/config-reference.md](reference/config-reference.md)
   - [reference/env-reference.md](reference/env-reference.md)
   - [reference/cli-reference.md](reference/cli-reference.md)
+  - [reference/tui-reference.md](reference/tui-reference.md)
   - [reference/replay-fixture-format.md](reference/replay-fixture-format.md)
   - [reference/metrics-reference.md](reference/metrics-reference.md)
   - [reference/error-reference.md](reference/error-reference.md)

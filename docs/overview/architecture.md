@@ -3,6 +3,7 @@
 ## 目的
 
 このシステムの全体像を、実装ファイルに対応づけて説明します。
+control plane の詳細は専用設計ドキュメントでも補足します。
 
 ## システム要約
 
@@ -41,6 +42,10 @@
 - Replay harness
   - [src/app/replay.rs](../../src/app/replay.rs)
   - [src/bin/replay.rs](../../src/bin/replay.rs)
+- Control plane architecture
+  - [src/control.rs](../../src/control.rs)
+  - [src/main.rs](../../src/main.rs)
+  - 詳細設計: [architecture/control-plane.md](architecture/control-plane.md) （別ドキュメントで詳細説明）
 
 ## システムコンテキスト
 
@@ -62,5 +67,6 @@ flowchart LR
 - trusted: main process の core/handler、Discord token、HTTP 送信
 - untrusted: Discord message content、sandbox guest 実行結果、外部 API 応答
 
-詳細は [architecture/runtime-protection.md](../architecture/runtime-protection.md) と
+詳細は [architecture/runtime-protection.md](architecture/runtime-protection.md) と
+[architecture/control-plane.md](architecture/control-plane.md) と
 [security/threat-model.md](../security/threat-model.md) を参照してください。

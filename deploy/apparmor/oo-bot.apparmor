@@ -11,6 +11,8 @@ profile oo-bot /opt/oo-bot/oo-bot {
   /etc/oo-bot/oo-bot.yaml r,
   /etc/oo-bot/oo-bot.env r,
   /var/lib/oo-bot/** rwk,
+  /run/oo-bot/ rw,
+  /run/oo-bot/** rwk,
   /tmp/** rw,
 
   deny /proc/** w,

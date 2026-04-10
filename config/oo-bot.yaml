@@ -1,9 +1,13 @@
 detector:
   backend: morphological_reading
+  # target_readings は任意に変更できます。
+  # 漢字語は Lindera の「読み」に正規化してこのリストと照合されます。
+  # 漢字語を狙う場合は、ひらがな/カタカナ読みをここに追加してください（例: "おお", "うお"）。
   target_readings:
     - "おお"
     - "オオ"
     - "oo"
+  # literal_sequence_patterns は本文の文字列そのものを non-overlapping で検出します。
   literal_sequence_patterns:
     - "おお"
     - "オオ"

@@ -12,8 +12,10 @@ Environment=RUST_LOG=info
 Environment=OO_CONFIG_PATH=/etc/oo-bot/oo-bot.yaml
 EnvironmentFile=-/etc/oo-bot/oo-bot.env
 ExecStart=/opt/oo-bot/oo-bot run
+ExecStop=/opt/oo-bot/oo-bot control stop
 Restart=on-failure
 RestartSec=2
+TimeoutStopSec=20
 
 NoNewPrivileges=true
 PrivateTmp=true

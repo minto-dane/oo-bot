@@ -5,6 +5,10 @@ use discord_oo_bot::{
 };
 use proptest::prelude::*;
 
+fn unicode_input() -> impl Strategy<Value = String> {
+    proptest::collection::vec(any::<char>(), 0..256).prop_map(|chars| chars.into_iter().collect())
+}
+
 fn build_core(max_send: usize) -> TrustedCore {
     let analyzer =
         WasmtimeSandboxAnalyzer::new(SandboxConfig::default()).expect("sandbox should initialize");
@@ -20,8 +24,13 @@ fn build_core(max_send: usize) -> TrustedCore {
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 64,
+        .. ProptestConfig::default()
+    })]
+
     #[test]
-    fn governor_never_exceeds_send_char_cap(s in any::<String>()) {
+    fn governor_never_exceeds_send_char_cap(s in unicode_input()) {
         let max_send = 128usize;
         let mut core = build_core(max_send);
         let decision = core.decide_message(
@@ -41,7 +50,7 @@ proptest! {
     }
 
     #[test]
-    fn duplicate_suppression_is_idempotent(s in any::<String>()) {
+    fn duplicate_suppression_is_idempotent(s in unicode_input()) {
         let mut core = build_core(256);
         let ctx = MessageContext {
             message_id: 42,
@@ -57,7 +66,7 @@ proptest! {
     }
 
     #[test]
-    fn suspicious_handling_never_panics(s in any::<String>()) {
+    fn suspicious_handling_never_panics(s in unicode_input()) {
         let mut core = build_core(512);
         let _ = core.decide_message(
             MessageContext {

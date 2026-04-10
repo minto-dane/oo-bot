@@ -16,12 +16,15 @@
 3. [docs/product/behavior-spec.md](product/behavior-spec.md)
 4. [docs/architecture/runtime-protection.md](architecture/runtime-protection.md)
 5. [docs/operations/deployment.md](operations/deployment.md)
+6. [docs/operations/service-control.md](operations/service-control.md)
+7. [docs/reference/tui-reference.md](reference/tui-reference.md)
 
 ## Source of Truth
 
 - 実行挙動: [src/](../src)
 - 設定 source of truth: [config/oo-bot.yaml](../config/oo-bot.yaml)
 - 設定 schema / validation / bootstrap: [src/config.rs](../src/config.rs)
+- operator TUI 文言 source of truth: [config/i18n/operator_tui.yaml](../config/i18n/operator_tui.yaml)
 - CI/CD: [.github/workflows/ci.yml](../.github/workflows/ci.yml), [.github/workflows/security.yml](../.github/workflows/security.yml)
 - ローカル実行導線: [Justfile](../Justfile), [flake.nix](../flake.nix)
 

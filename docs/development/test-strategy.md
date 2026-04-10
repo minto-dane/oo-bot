@@ -19,6 +19,13 @@
 - benchmark
   - pure vs sandbox+governor overhead
 
+## Deterministic テスト原則
+
+- OS 環境依存 (`/run` の有無、環境変数の競合) を直接テスト条件にしない
+- path 選択ロジックは resolver へ分離し、注入可能な文脈で分岐を固定化する
+- global 環境変数を書き換えるテストは最小化し、必要なら lock で直列化する
+- property テストはケース数と入力長を明示し、CI 予算内で安定実行する
+
 ## 推奨実行順
 
 1. `cargo test --workspace --all-features`

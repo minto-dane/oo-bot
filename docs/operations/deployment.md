@@ -7,7 +7,83 @@
 ## 前提
 
 - Rust toolchain が導入済み
+- SQLite CLI と開発ライブラリが導入済み
+- ビルド依存 (`pkg-config`, OpenSSL 開発ヘッダ, C toolchain) が導入済み
 - 秘密情報は Secret Manager 管理
+
+## 必要コンポーネント
+
+- Rust (`cargo`, `rustc`)
+- SQLite (`sqlite3`)
+- OpenSSL 開発ヘッダ
+- `pkg-config`
+- C/C++ ビルドツール (`gcc/clang`, `make`)
+- `git`, `curl`, `ca-certificates`
+
+Lindera は `embedded://ipadic` を使うため、追加の外部辞書パッケージは不要です。
+
+## インストール例（主要 package manager）
+
+### Debian / Ubuntu (apt)
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+	git curl ca-certificates \
+	build-essential pkg-config libssl-dev \
+	sqlite3 libsqlite3-dev
+```
+
+### Fedora / RHEL 系 (dnf)
+
+```bash
+sudo dnf install -y \
+	git curl ca-certificates \
+	gcc gcc-c++ make pkgconf-pkg-config openssl-devel \
+	sqlite sqlite-devel
+```
+
+### Arch Linux (pacman)
+
+```bash
+sudo pacman -S --needed \
+	git curl ca-certificates \
+	base-devel pkgconf openssl sqlite
+```
+
+### openSUSE (zypper)
+
+```bash
+sudo zypper install -y \
+	git curl ca-certificates \
+	gcc gcc-c++ make pkg-config libopenssl-devel \
+	sqlite3 sqlite3-devel
+```
+
+### macOS (Homebrew)
+
+```bash
+brew install git curl pkg-config openssl@3 sqlite3
+```
+
+## Rust 導入（推奨: rustup）
+
+OS に関わらず、Rust は rustup で stable を入れる運用を推奨します。
+
+```bash
+curl https://sh.rustup.rs -sSf | sh -s -- -y
+source "$HOME/.cargo/env"
+rustup toolchain install stable
+rustup default stable
+```
+
+ディストリ標準の Rust パッケージを使う場合は、次のコマンドでも導入できます。
+
+- apt: `sudo apt-get install -y rustc cargo`
+- dnf: `sudo dnf install -y rust cargo`
+- pacman: `sudo pacman -S --needed rust`
+- zypper: `sudo zypper install -y rust cargo`
+- brew: `brew install rust`
 
 ## デプロイ前チェック
 
@@ -36,11 +112,16 @@
 cargo run --bin oo-bot -- run
 ```
 
+systemd 運用時は [service-control.md](service-control.md) の unit を使います。
+本番では、前景 `cargo run` より systemd 常駐を優先します。
+
 ## 起動後確認
 
 - `bot is connected` ログ
 - governor decision ログが出力される
 - `mode` が想定値
+- `cargo run --bin oo-bot -- control status` が応答する
+- `cargo run --bin oo-bot -- tui` から dashboard / diagnostics / audit / stop 導線へ入れる
 
 ## ロールバック
 

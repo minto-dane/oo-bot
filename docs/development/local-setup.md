@@ -22,6 +22,9 @@ cargo run --bin oo-bot -- config init
 
 `.env` には最低限 `DISCORD_TOKEN` を設定します。
 初期値を調整したい場合は `cargo run --bin oo-bot -- config setup` または `cargo run --bin oo-bot -- tui --page setup` を使います。
+初回起動は `cargo run --bin oo-bot` を実行します。
+bot 起動後は別シェルから `cargo run --bin oo-bot -- tui` で何度でも TUI に入り直せます。
+停止は `cargo run --bin oo-bot -- control stop` または TUI の停止導線を使います。
 
 ## 推奨ツール導入
 

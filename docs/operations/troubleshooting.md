@@ -61,6 +61,34 @@
   - `[[sandbox_trap]]` / `[[sandbox_timeout]]` を含む入力になっているか確認
   - replay 専用 analyzer injection が有効か確認
 
+### 5. TUI を閉じると bot も止まると思っていた
+
+- `oo-bot tui` は bot 本体とは別プロセス
+- `q` は TUI だけを終了
+- bot 停止は `control stop` または TUI の `x` 停止導線を使う
+
+### 6. `control status` / `control stop` が失敗する
+
+確認順:
+
+1. bot 本体が実行中か
+2. `OO_CONFIG_PATH` が bot 本体と一致しているか
+3. control socket が存在するか
+4. socket への権限があるか
+
+見るべき点:
+
+- `/run/oo-bot/control.sock`
+- `$XDG_RUNTIME_DIR/oo-bot/control.sock`
+- `/tmp/oo-bot-control-*.sock`
+- `cargo run --bin oo-bot -- control status`
+
+### 7. `Ctrl+C` で bot が止まらない
+
+- 現行実装では `SIGINT` は accidental stop 防止のため停止に使わない
+- 明示停止は `control stop` または systemd `stop` を使う
+- service manager からの `SIGTERM` は graceful stop として受け付ける
+
 ## 再現コマンド
 
 ```bash

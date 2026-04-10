@@ -25,12 +25,13 @@ strict YAML 設定のキーと検証規則を定義します。
 ## detector
 
 - backend: `morphological_reading` のみ
-- `target_readings`: 空不可
+- `target_readings`: 空不可（読みベース。漢字そのものを列挙しなくても、読みが一致すれば hit）
 - `literal_sequence_patterns`: 空可
 - `special_phrases`: 空不可
 
 `morphological_reading` は Lindera (`embedded://ipadic`) を使用し、
 `details()[7]` / `details()[8]` / surface を正規化して判定します。
+例: `target_readings` に `おお` を含む場合、`大きい` のような漢字語も読みが `おお...` なら hit 対象です。
 
 ## bot
 

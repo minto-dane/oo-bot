@@ -1,0 +1,4 @@
+/opt/oo-bot/oo-bot                      --      gen_context(system_u:object_r:oo_bot_exec_t,s0)
+/etc/oo-bot(/.*)?                               gen_context(system_u:object_r:oo_bot_etc_t,s0)
+/var/lib/oo-bot(/.*)?                           gen_context(system_u:object_r:oo_bot_var_lib_t,s0)
+/run/oo-bot(/.*)?                               gen_context(system_u:object_r:oo_bot_var_run_t,s0)
