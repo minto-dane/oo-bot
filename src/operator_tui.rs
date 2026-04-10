@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -34,6 +34,7 @@ const TUI_AUDIT_CAP: usize = 250;
 const MAX_INPUT_BUFFER_LEN: usize = 4096;
 const MAX_AUDIT_SEARCH_LEN: usize = 256;
 const OPERATOR_TUI_I18N_YAML: &str = include_str!("../config/i18n/operator_tui.yaml");
+const CONTROL_STATUS_AUTO_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperatorTuiEntry {
@@ -173,6 +174,7 @@ struct OperatorTuiApp {
     input_mode: InputMode,
     input_buffer: String,
     status: String,
+    last_control_refresh: Instant,
     lsm_status: LsmStatus,
     hardening_status: HardeningStatus,
     diagnostics: DiagnosticsSummary,
@@ -261,6 +263,7 @@ pub fn run_operator_tui(
         input_buffer: String::new(),
         lsm_status,
         hardening_status,
+        last_control_refresh: Instant::now(),
         diagnostics,
         control,
         setup: SetupState {
@@ -281,6 +284,11 @@ pub fn run_operator_tui(
 
     let loop_result = (|| -> Result<OperatorTuiResult, String> {
         loop {
+            if should_auto_refresh_control(&app) {
+                refresh_control_state(&mut app);
+                app.last_control_refresh = Instant::now();
+            }
+
             terminal.draw(|frame| render_app(frame, &app)).map_err(|err| err.to_string())?;
 
             if !event::poll(std::time::Duration::from_millis(200)).map_err(|err| err.to_string())? {
@@ -292,6 +300,10 @@ pub fn run_operator_tui(
             };
             if key.kind != KeyEventKind::Press {
                 continue;
+            }
+
+            if is_force_quit_key(key.code, key.modifiers) {
+                return Ok(OperatorTuiResult { saved_config: app.saved_config });
             }
 
             match app.input_mode {
@@ -1165,6 +1177,18 @@ fn handle_audit_search_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<b
         _ => {}
     }
     Ok(false)
+}
+
+fn should_auto_refresh_control(app: &OperatorTuiApp) -> bool {
+    matches!(app.input_mode, InputMode::Normal)
+        && matches!(app.screen, Screen::Dashboard | Screen::Diagnostics)
+        && app.last_control_refresh.elapsed() >= CONTROL_STATUS_AUTO_REFRESH_INTERVAL
+}
+
+fn is_force_quit_key(code: KeyCode, modifiers: KeyModifiers) -> bool {
+    matches!(code, KeyCode::Char('Q'))
+        || (matches!(code, KeyCode::Char('c') | KeyCode::Char('C'))
+            && modifiers.contains(KeyModifiers::CONTROL))
 }
 
 fn build_diagnostics_summary(
@@ -2307,6 +2331,7 @@ mod tests {
             landing_screen: Screen::Dashboard,
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
+            last_control_refresh: Instant::now(),
             lsm_status: LsmStatus {
                 active_modules: vec!["apparmor".to_string(), "yama".to_string()],
                 apparmor_profile: Some("docker-default".to_string()),
