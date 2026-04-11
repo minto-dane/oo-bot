@@ -41,6 +41,33 @@
 - 外部 exporter (Prometheus/OpenTelemetry) は未実装
 - triage は structured log 中心
 
+## 高度分析（Target 検出 / Response）
+
+監査 DB (`audit_events`) には、target 検出と response 判定の詳細フィールド
+(`matched_readings_json`, `sequence_hits`, `kanji_hits`, `selected_action`, `suppressed_reason`, `mode`, `processing_time_ms`) が保存されます。
+
+詳細分析は次のスクリプトで実行できます。
+
+```bash
+python3 scripts/audit_advanced_analysis.py \
+  --db state/audit/events.sqlite3 \
+  --out-dir state/security/audit-advanced-analysis \
+  --chart
+```
+
+出力される主な成果物:
+
+- `summary.json`
+- `event_type_counts.csv`
+- `response_action_counts.csv`
+- `suppression_reason_counts.csv`
+- `mode_counts.csv`
+- `matched_readings_top.csv`
+- `events_per_hour.csv`
+- `*.png` (チャート生成時)
+
+`--chart` は `matplotlib` が必要です。未導入時は CSV/JSON のみ生成されます。
+
 ## 推奨運用
 
 - suppress_reason の急増をアラート条件化

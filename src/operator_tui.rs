@@ -592,7 +592,7 @@ fn render_dashboard(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Op
             app.language,
             "common.export_safe_policy",
             app.diagnostics.export_safe_policy_status.clone(),
-            Style::default().fg(Color::Blue),
+            Style::default().fg(Color::Yellow),
         ),
         line_kv(
             app.language,
@@ -665,7 +665,7 @@ fn render_setup(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Operat
         Block::default()
             .title(label(app.language, "setup.title", "setup.title"))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue)),
+            .border_style(Style::default().fg(Color::White)),
     )
     .wrap(Wrap { trim: true });
     frame.render_widget(page_title, chunks[0]);
@@ -696,7 +696,7 @@ fn render_setup(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Operat
                 Block::default()
                     .title(label(app.language, "setup.fields_title", "setup.fields_title"))
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Blue)),
+                    .border_style(Style::default().fg(Color::White)),
             )
             .wrap(Wrap { trim: false });
         frame.render_widget(body, chunks[1]);
@@ -779,7 +779,7 @@ fn render_diagnostics(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &
             app.language,
             "common.export_safe_policy",
             app.diagnostics.export_safe_policy_status.clone(),
-            Style::default().fg(Color::Blue),
+            Style::default().fg(Color::Yellow),
         ),
         line_kv(
             app.language,
@@ -830,7 +830,12 @@ fn render_diagnostics(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &
 fn render_audit(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &OperatorTuiApp) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(5), Constraint::Length(6), Constraint::Min(10)])
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Length(6),
+            Constraint::Length(8),
+            Constraint::Min(6),
+        ])
         .split(area);
 
     let filtered = filtered_audit_rows(&app.audit);
@@ -882,6 +887,16 @@ fn render_audit(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Operat
     .wrap(Wrap { trim: true });
     frame.render_widget(status, chunks[1]);
 
+    let advanced = Paragraph::new(build_audit_advanced_block(app.language, &filtered))
+        .block(
+            Block::default()
+                .title(label(app.language, "audit.advanced_title", "audit.advanced_title"))
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Yellow)),
+        )
+        .wrap(Wrap { trim: true });
+    frame.render_widget(advanced, chunks[2]);
+
     let lines = filtered
         .iter()
         .take(TUI_AUDIT_CAP)
@@ -919,10 +934,10 @@ fn render_audit(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &Operat
         Block::default()
             .title(label(app.language, "audit.rows_title", "audit.rows_title"))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue)),
+            .border_style(Style::default().fg(Color::White)),
     )
     .wrap(Wrap { trim: true });
-    frame.render_widget(rows, chunks[2]);
+    frame.render_widget(rows, chunks[3]);
 }
 
 fn handle_global_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<bool, String> {
@@ -1042,7 +1057,7 @@ fn handle_setup_normal_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<(
                 app.setup.selected += 1;
             }
         }
-        KeyCode::Enter => {
+        KeyCode::Char('d') => {
             if let Some(field) = selected_setup_field(&app.setup) {
                 restore_default_for_field(&mut app.setup, field);
                 app.status = template(
@@ -1052,7 +1067,7 @@ fn handle_setup_normal_keys(app: &mut OperatorTuiApp, code: KeyCode) -> Result<(
                 );
             }
         }
-        KeyCode::Char('e') => {
+        KeyCode::Enter | KeyCode::Char('e') => {
             if let Some(field) = selected_setup_field(&app.setup) {
                 app.input_mode = InputMode::SetupEdit(field);
                 app.input_buffer.clear();
@@ -1570,6 +1585,127 @@ fn format_counts(language: UiLanguage, counts: &BTreeMap<String, usize>) -> Stri
         return label(language, "common.none", "common.none").to_string();
     }
     counts.iter().map(|(key, value)| format!("{key}={value}")).collect::<Vec<_>>().join(", ")
+}
+
+fn build_audit_advanced_block(language: UiLanguage, rows: &[AuditEventRow]) -> String {
+    let top_targets = top_counts(
+        rows.iter().flat_map(|row| parse_matched_readings(&row.matched_readings_json)),
+        8,
+    );
+    let response_counts = top_counts(rows.iter().map(|row| row.selected_action.clone()), 8);
+    let suppression_counts = top_counts(
+        rows.iter()
+            .filter(|row| !row.suppressed_reason.is_empty())
+            .map(|row| row.suppressed_reason.clone()),
+        8,
+    );
+    let mode_counts = top_counts(rows.iter().map(|row| row.mode.clone()), 8);
+    let (p50, p95, max) = processing_ms_percentiles(rows);
+    let timeline = hourly_histogram(rows, 8);
+
+    format!(
+        "{}: {}\n{}: {}\n{}: {}\n{}: {}\n{}: p50={} p95={} max={}\n{}: {}",
+        label(language, "audit.advanced_targets", "audit.advanced_targets"),
+        format_pairs(language, &top_targets),
+        label(language, "audit.advanced_response", "audit.advanced_response"),
+        format_pairs(language, &response_counts),
+        label(language, "audit.advanced_suppression", "audit.advanced_suppression"),
+        format_pairs(language, &suppression_counts),
+        label(language, "audit.advanced_modes", "audit.advanced_modes"),
+        format_pairs(language, &mode_counts),
+        label(language, "audit.advanced_latency", "audit.advanced_latency"),
+        p50,
+        p95,
+        max,
+        label(language, "audit.advanced_timeline", "audit.advanced_timeline"),
+        if timeline.is_empty() {
+            label(language, "common.none", "common.none").to_string()
+        } else {
+            timeline
+        },
+    )
+}
+
+fn parse_matched_readings(raw: &str) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(raw)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn top_counts(values: impl Iterator<Item = String>, limit: usize) -> Vec<(String, usize)> {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for value in values {
+        let entry = counts.entry(value).or_insert(0);
+        *entry = entry.saturating_add(1);
+    }
+    let mut pairs = counts.into_iter().collect::<Vec<_>>();
+    pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    pairs.truncate(limit);
+    pairs
+}
+
+fn format_pairs(language: UiLanguage, pairs: &[(String, usize)]) -> String {
+    if pairs.is_empty() {
+        return label(language, "common.none", "common.none").to_string();
+    }
+    pairs.iter().map(|(key, value)| format!("{key}={value}")).collect::<Vec<_>>().join(", ")
+}
+
+fn processing_ms_percentiles(rows: &[AuditEventRow]) -> (i64, i64, i64) {
+    let mut values = rows
+        .iter()
+        .map(|row| row.processing_time_ms)
+        .filter(|value| *value > 0)
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return (0, 0, 0);
+    }
+    values.sort_unstable();
+    let p50 = percentile_indexed(&values, 50);
+    let p95 = percentile_indexed(&values, 95);
+    let max = *values.last().unwrap_or(&0);
+    (p50, p95, max)
+}
+
+fn percentile_indexed(sorted: &[i64], percentile: usize) -> i64 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let idx = ((sorted.len() - 1) * percentile) / 100;
+    sorted[idx]
+}
+
+fn hourly_histogram(rows: &[AuditEventRow], buckets: usize) -> String {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for row in rows {
+        if row.ts_utc.len() < 13 {
+            continue;
+        }
+        let hour = format!("{}:00Z", &row.ts_utc[..13]);
+        let entry = counts.entry(hour).or_insert(0);
+        *entry = entry.saturating_add(1);
+    }
+
+    if counts.is_empty() {
+        return String::new();
+    }
+
+    let max = counts.values().copied().max().unwrap_or(1).max(1);
+    let mut pairs = counts.into_iter().collect::<Vec<_>>();
+    if pairs.len() > buckets {
+        pairs = pairs[pairs.len() - buckets..].to_vec();
+    }
+
+    pairs
+        .into_iter()
+        .map(|(hour, count)| {
+            let bar_len = (count * 10).div_ceil(max).max(1);
+            format!("{}:{}({})", &hour[5..13], "#".repeat(bar_len), count)
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn previous_setup_page(page: SetupPage) -> SetupPage {
@@ -2505,8 +2641,31 @@ mod tests {
         assert!(!snapshot.contains("channel-raw-id"));
         assert!(!snapshot.contains("user-raw-id"));
         assert!(!snapshot.contains("message-raw-id"));
-        assert!(!snapshot.contains("super-secret-reading"));
+        assert!(snapshot.contains("super-secret-reading"));
         assert!(!snapshot.contains("raw-message-fragment"));
+    }
+
+    #[test]
+    fn audit_render_includes_advanced_analysis_panel() {
+        let mut app = sample_app(Screen::Audit);
+        app.audit.rows[0].matched_readings_json = "[\"おお\",\"おおき\"]".to_string();
+        app.audit.rows.push(AuditEventRow {
+            event_id: 9,
+            event_type: "suppressed".to_string(),
+            selected_action: "noop".to_string(),
+            suppressed_reason: "duplicate_guard".to_string(),
+            mode: "observe_only".to_string(),
+            ts_utc: "2026-01-01T09:00:00Z".to_string(),
+            processing_time_ms: 7,
+            matched_readings_json: "[\"おお\"]".to_string(),
+            ..app.audit.rows[0].clone()
+        });
+
+        let snapshot = render_snapshot(&app, 120, 30);
+        let compact = compact_snapshot(&snapshot);
+        assert!(compact.contains("AdvancedAnalysis"));
+        assert!(compact.contains("toptargets"));
+        assert!(compact.contains("responsedistribution"));
     }
 
     #[test]
