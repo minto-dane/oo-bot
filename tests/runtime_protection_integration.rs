@@ -40,11 +40,19 @@ fn governed_path_keeps_existing_behavior_for_mixed_input() {
 }
 
 #[test]
+fn single_literal_match_reacts_once() {
+    let mut core = core_with_default();
+
+    let decision = core.decide_message(test_context(50), "oo");
+    assert!(matches!(decision.action, BotAction::React { .. }));
+}
+
+#[test]
 fn duplicate_message_is_suppressed() {
     let mut core = core_with_default();
 
     let first = core.decide_message(test_context(100), "oo");
-    assert!(matches!(first.action, BotAction::React { .. } | BotAction::SendMessage { .. }));
+    assert!(matches!(first.action, BotAction::React { .. }));
 
     let second = core.decide_message(test_context(100), "oo");
     assert_eq!(second.action, BotAction::Noop);
