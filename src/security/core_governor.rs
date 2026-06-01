@@ -513,7 +513,7 @@ impl TrustedCore {
 
     fn allow_guild(&self, guild_id: Option<u64>) -> bool {
         let Some(gid) = guild_id else {
-            return true;
+            return self.runtime.allow_guild_ids.is_empty();
         };
 
         if self.runtime.deny_guild_ids.contains(&gid) {
@@ -664,6 +664,31 @@ mod tests {
         let second = core.decide_message(ctx, "oo");
         assert_eq!(second.action, BotAction::Noop);
         assert!(second.suppress_reason.is_some());
+    }
+
+    #[test]
+    fn allowlist_blocks_direct_messages_without_guild() {
+        let cfg = RuntimeProtectionConfig {
+            allow_guild_ids: vec![999],
+            ..RuntimeProtectionConfig::default()
+        };
+        let mut core = TrustedCore::new(
+            Box::new(FixedAnalyzer { proposal: ActionProposal::ReactOnce }),
+            BotConfig::default(),
+            cfg,
+        );
+
+        let ctx = MessageContext {
+            message_id: 7,
+            author_id: 8,
+            channel_id: 9,
+            guild_id: None,
+            author_is_bot: false,
+        };
+
+        let decision = core.decide_message(ctx, "oo");
+        assert_eq!(decision.action, BotAction::Noop);
+        assert_eq!(decision.suppress_reason, Some(super::SuppressReason::GuildDenied));
     }
 
     #[test]
