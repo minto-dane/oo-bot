@@ -89,10 +89,10 @@ fn proposal_to_action(
         ActionProposal::SpecialPhrase => BotAction::SendMessage { content: bot.stamp_text.clone() },
         ActionProposal::ReactOnce => as_react(bot),
         ActionProposal::SendStamped { count } => {
-            if *count <= 1 {
+            let repeats = (*count as usize).min(detector_total_count.max(1));
+            if repeats <= 1 {
                 as_react(bot)
             } else {
-                let repeats = (*count as usize).min(detector_total_count.max(1));
                 let rendered = render_template(
                     &bot.send_template,
                     repeats,
@@ -243,5 +243,24 @@ mod tests {
         });
 
         assert_eq!(action, BotAction::Noop);
+    }
+
+    #[test]
+    fn caps_send_decision_to_trusted_detector_count() {
+        let cfg = BotConfig::default();
+
+        let action = compile_response(&CompileContext {
+            proposal: &ActionProposal::SendStamped { count: 2 },
+            mode: RuntimeMode::Normal,
+            suspicion: SuspicionLevel::None,
+            bot: &cfg,
+            max_send_chars: 300,
+            matched_backend: "morphological_reading",
+            matched_reading: None,
+            count_cap: cfg.max_count_cap,
+            detector_total_count: 1,
+        });
+
+        assert!(matches!(action, BotAction::React { .. }));
     }
 }
