@@ -154,7 +154,7 @@ sudo install -d -m 0755 /opt/oo-bot /etc/oo-bot
 sudo install -m 0755 target/release/oo-bot /opt/oo-bot/oo-bot
 sudo install -m 0644 deploy/systemd/oo-bot.service /etc/systemd/system/oo-bot.service
 sudo install -m 0644 config/oo-bot.yaml /etc/oo-bot/oo-bot.yaml
-sudo cp env.example /etc/oo-bot/oo-bot.env
+sudo install -m 0600 env.example /etc/oo-bot/oo-bot.env
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now oo-bot
