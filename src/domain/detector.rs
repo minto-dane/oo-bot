@@ -56,7 +56,7 @@ pub struct DetectionReport {
 impl DetectionReport {
     #[must_use]
     pub fn backend_count_for_sandbox(&self) -> usize {
-        self.total_count
+        self.kanji_hits
     }
 }
 
@@ -233,5 +233,21 @@ mod tests {
 
         let kanji_word = detector.detect("大きい");
         assert!(kanji_word.total_count >= 1);
+    }
+
+    #[test]
+    fn sandbox_backend_count_excludes_literal_sequence_hits() {
+        let report = super::DetectionReport {
+            backend: DetectorBackendKind::MorphologicalReading,
+            matched_backend: "morphological_reading",
+            matched_readings: vec![],
+            sequence_hits: 1,
+            kanji_hits: 0,
+            total_count: 1,
+            special_phrase_hit: false,
+            token_count: 0,
+        };
+
+        assert_eq!(report.backend_count_for_sandbox(), 0);
     }
 }
