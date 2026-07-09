@@ -23,12 +23,14 @@ use tokio::time::{timeout, Duration};
 const CONTROL_SOCKET_NAME: &str = "control.sock";
 const CONTROL_RUNTIME_DIR: &str = "/run/oo-bot";
 const FALLBACK_SOCKET_PREFIX: &str = "oo-bot-control-";
+const FALLBACK_RUNTIME_DIR: &str = ".cache/oo-bot/runtime-control";
 const CONTROL_CONNECTION_TIMEOUT_SECS: u64 = 2;
 
 #[derive(Debug, Clone)]
 struct ControlSocketResolutionContext {
     explicit_socket_path: Option<String>,
     xdg_runtime_dir: Option<String>,
+    home_dir: Option<String>,
     runtime_dir_exists: bool,
 }
 
@@ -36,6 +38,7 @@ fn current_control_socket_resolution_context() -> ControlSocketResolutionContext
     ControlSocketResolutionContext {
         explicit_socket_path: std::env::var("OO_CONTROL_SOCKET_PATH").ok(),
         xdg_runtime_dir: std::env::var("XDG_RUNTIME_DIR").ok(),
+        home_dir: std::env::var("HOME").ok(),
         runtime_dir_exists: Path::new(CONTROL_RUNTIME_DIR).is_dir(),
     }
 }
@@ -64,7 +67,16 @@ fn resolve_control_socket_path(
 
     let digest = Sha256::digest(config_path.to_string_lossy().as_bytes());
     let suffix = hex::encode(digest);
-    Path::new("/tmp").join(format!("{FALLBACK_SOCKET_PREFIX}{}.sock", &suffix[..16]))
+    let socket_name = format!("{FALLBACK_SOCKET_PREFIX}{}.sock", &suffix[..16]);
+
+    if let Some(path) = &context.home_dir {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return Path::new(trimmed).join(FALLBACK_RUNTIME_DIR).join(socket_name);
+        }
+    }
+
+    config_path.parent().unwrap_or_else(|| Path::new(".")).join(".oo-bot-runtime").join(socket_name)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -390,6 +402,7 @@ mod tests {
         let context = ControlSocketResolutionContext {
             explicit_socket_path: Some(explicit.display().to_string()),
             xdg_runtime_dir: Some(dir.path().display().to_string()),
+            home_dir: None,
             runtime_dir_exists: true,
         };
 
@@ -405,6 +418,7 @@ mod tests {
         let context = ControlSocketResolutionContext {
             explicit_socket_path: None,
             xdg_runtime_dir: Some(dir.path().display().to_string()),
+            home_dir: None,
             runtime_dir_exists: true,
         };
 
@@ -421,6 +435,7 @@ mod tests {
         let context = ControlSocketResolutionContext {
             explicit_socket_path: Some("   ".to_string()),
             xdg_runtime_dir: Some(dir.path().display().to_string()),
+            home_dir: None,
             runtime_dir_exists: false,
         };
 
@@ -437,6 +452,7 @@ mod tests {
         let context = ControlSocketResolutionContext {
             explicit_socket_path: None,
             xdg_runtime_dir: Some(dir.path().display().to_string()),
+            home_dir: None,
             runtime_dir_exists: false,
         };
 
@@ -446,14 +462,16 @@ mod tests {
     }
 
     #[test]
-    fn socket_path_falls_back_to_tmp_hash_when_no_runtime_dir_available() {
+    fn socket_path_falls_back_to_home_runtime_dir_when_no_runtime_dir_available() {
         let dir = tempdir().expect("temp dir");
+        let home_dir = dir.path().join("home");
         let config_path = dir.path().join("config.yaml");
         let other_config_path = dir.path().join("other-config.yaml");
 
         let context = ControlSocketResolutionContext {
             explicit_socket_path: None,
             xdg_runtime_dir: None,
+            home_dir: Some(home_dir.display().to_string()),
             runtime_dir_exists: false,
         };
 
@@ -461,9 +479,29 @@ mod tests {
         let resolved_other = resolve_control_socket_path(&other_config_path, &context);
         let resolved_str = resolved.display().to_string();
 
-        assert!(resolved.starts_with("/tmp"));
+        assert!(resolved.starts_with(home_dir.join(FALLBACK_RUNTIME_DIR)));
         assert!(resolved_str.contains(FALLBACK_SOCKET_PREFIX));
         assert!(resolved_str.ends_with(".sock"));
         assert_ne!(resolved, resolved_other);
+    }
+
+    #[test]
+    fn socket_path_falls_back_to_config_scoped_runtime_dir_without_home() {
+        let dir = tempdir().expect("temp dir");
+        let config_path = dir.path().join("config.yaml");
+
+        let context = ControlSocketResolutionContext {
+            explicit_socket_path: None,
+            xdg_runtime_dir: None,
+            home_dir: None,
+            runtime_dir_exists: false,
+        };
+
+        let resolved = resolve_control_socket_path(&config_path, &context);
+        let resolved_str = resolved.display().to_string();
+
+        assert!(resolved.starts_with(dir.path().join(".oo-bot-runtime")));
+        assert!(resolved_str.contains(FALLBACK_SOCKET_PREFIX));
+        assert!(resolved_str.ends_with(".sock"));
     }
 }
